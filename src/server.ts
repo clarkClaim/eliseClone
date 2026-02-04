@@ -1,13 +1,36 @@
 import 'dotenv/config';
+import express, { Request, Response } from 'express';
 import { SyncService } from './sync/index.js';
 import { OpenMRSAdapter } from './mrs/openmrs/adapter.js';
+import { handleToolCall, VapiToolCallRequest, VapiToolCallResponse } from './agent/tools/index.js';
 
 const PORT = process.env.PORT || 3000;
+const app = express();
 
-// Placeholder server - will be replaced with Express/Fastify
-console.log(`Starting Elise Clone server...`);
-console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log(`Port: ${PORT}`);
+// Middleware
+app.use(express.json());
+
+// Health endpoint
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+  });
+});
+
+// VAPI tool-call endpoint
+app.post('/vapi/tools', async (req: Request, res: Response) => {
+  const request = req.body as VapiToolCallRequest;
+
+  console.log('[VAPI] Tool call received:', JSON.stringify(request, null, 2));
+
+  const response = await handleToolCall(request);
+
+  console.log('[VAPI] Tool call response:', JSON.stringify(response, null, 2));
+
+  res.json(response);
+});
 
 // Start sync service if OpenMRS is configured
 function startSyncService(): SyncService | null {
@@ -23,23 +46,25 @@ function startSyncService(): SyncService | null {
   }
 }
 
+// Start server
+const server = app.listen(PORT, () => {
+  console.log(`[Server] Elise Clone server running on port ${PORT}`);
+  console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[Server] Health check: http://localhost:${PORT}/health`);
+  console.log(`[Server] VAPI tools: POST http://localhost:${PORT}/vapi/tools`);
+});
+
 const syncService = startSyncService();
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[Server] SIGTERM received, shutting down...');
+function shutdown() {
+  console.log('[Server] Shutting down...');
   syncService?.stop();
-  process.exit(0);
-});
+  server.close(() => {
+    console.log('[Server] HTTP server closed');
+    process.exit(0);
+  });
+}
 
-process.on('SIGINT', () => {
-  console.log('[Server] SIGINT received, shutting down...');
-  syncService?.stop();
-  process.exit(0);
-});
-
-// Health check endpoint will go here
-// VAPI webhook endpoint will go here
-// Chat HTTP endpoint will go here
-
-console.log('Server placeholder running. Implement HTTP server next.');
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
