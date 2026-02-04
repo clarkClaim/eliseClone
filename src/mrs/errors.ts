@@ -78,3 +78,52 @@ export class MRSValidationError extends MRSError {
     this.details = details;
   }
 }
+
+/**
+ * Thrown when rate limits are exceeded.
+ */
+export class MRSRateLimitError extends MRSError {
+  readonly retryAfterMs?: number;
+
+  constructor(retryAfterMs?: number) {
+    super(
+      retryAfterMs
+        ? `Rate limit exceeded. Retry after ${retryAfterMs}ms`
+        : 'Rate limit exceeded',
+      429,
+      true
+    );
+    this.name = 'MRSRateLimitError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/**
+ * Thrown when attempting to book a slot that is no longer available.
+ */
+export class SlotConflictError extends MRSError {
+  readonly slotId: string;
+
+  constructor(slotId: string) {
+    super(`Slot ${slotId} is no longer available`, 409, false);
+    this.name = 'SlotConflictError';
+    this.slotId = slotId;
+  }
+}
+
+/**
+ * Thrown when a time slot cannot be found.
+ */
+export class SlotNotFoundError extends MRSError {
+  readonly slotId: string;
+
+  constructor(slotId: string) {
+    super(`Time slot not found: ${slotId}`, 404, false);
+    this.name = 'SlotNotFoundError';
+    this.slotId = slotId;
+  }
+}
+
+// Re-export with canonical names for consistency with design doc
+export { AuthenticationError as MRSAuthenticationError };
+export { TimeoutError as MRSTimeoutError };

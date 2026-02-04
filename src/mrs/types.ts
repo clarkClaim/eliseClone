@@ -1,6 +1,48 @@
 // Canonical types for MRS data
 // These types are used across all MRS adapters to provide a consistent interface
 
+// ============================================
+// MRS CAPABILITIES
+// ============================================
+
+export interface MRSCapabilities {
+  patientSearch: {
+    byPhone: boolean;
+    byName: boolean;
+    byDOB: boolean;
+    byIdentifier: boolean;
+    globalSearch: boolean;
+  };
+
+  appointments: {
+    canCreate: boolean;
+    canCancel: boolean;
+    canReschedule: boolean;
+    canQueryByDateRange: boolean;
+    canQueryByPatient: boolean;
+    supportsStatuses: string[];
+  };
+
+  sync: {
+    supportsIncrementalSync: boolean;
+    supportsWebhooks: boolean;
+    hasModifiedSinceQuery: boolean;
+  };
+
+  rateLimits: {
+    requestsPerMinute: number | null;
+    requestsPerHour: number | null;
+    burstLimit: number | null;
+    perEndpointLimits: Record<string, number>;
+  };
+}
+
+export type MRSSystemType = 'openmrs' | 'epic' | 'cerner' | 'athena' | 'openemr';
+
+// ============================================
+// MRS ENTITY TYPES
+// ============================================
+
 export interface MRSPatient {
   mrsId: string;
   name: string;
@@ -95,4 +137,25 @@ export interface NewAppointment {
   slotMrsId: string;
   appointmentTypeMrsId?: string;
   reason?: string;
+}
+
+// Alias for design compatibility
+export type CreateAppointmentRequest = NewAppointment;
+
+// ============================================
+// SLOT VERIFICATION
+// ============================================
+
+export interface SlotVerificationResult {
+  available: boolean;
+  slot?: MRSSlot;
+}
+
+// ============================================
+// HEALTH CHECK
+// ============================================
+
+export interface HealthCheckResult {
+  healthy: boolean;
+  latencyMs: number;
 }

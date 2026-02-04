@@ -131,37 +131,46 @@ sync_state        - Last sync timestamps per entity type
 
 ### [4] MRS Adapter Layer
 
-**Purpose:** Abstract interface for medical record system integration.
+**Purpose:** Abstract interface for medical record system integration with capability discovery.
 
 **Responsibilities:**
 - Define standard operations (fetch patients, fetch providers, fetch/create appointments)
 - Handle authentication per MRS type
 - Transform MRS-specific data into canonical format
 - Manage rate limiting and error handling
+- Report system capabilities for adaptive behavior
 
 **Dependencies:** None (interface only)
 
-**Key Design:** Designed for multi-tenant deployment where different customers use different MRS systems. The adapter interface remains stable while implementations vary.
+**Key Design:** Designed for multi-tenant deployment where different customers use different MRS systems. The adapter interface remains stable while implementations vary. Each adapter reports its capabilities, allowing the system to adapt behavior based on what the MRS supports.
 
 ```typescript
 interface MRSAdapter {
+  readonly capabilities: MRSCapabilities;
+
+  // Connection lifecycle
+  connect(): Promise<void>
+  disconnect(): Promise<void>
+  healthCheck(): Promise<HealthCheckResult>
+
   // Patient operations
-  getPatient(id: string): Promise<Patient>
-  searchPatients(query: PatientQuery): Promise<Patient[]>
+  getPatient(mrsId: string): Promise<MRSPatient | null>
+  searchPatients(query: PatientSearchQuery): Promise<MRSPatient[]>
 
-  // Provider operations
-  getProvider(id: string): Promise<Provider>
-  getProviders(): Promise<Provider[]>
+  // Provider & Location operations
+  getProviders(): Promise<MRSProvider[]>
+  getLocations(): Promise<MRSLocation[]>
 
-  // Appointment operations
-  getAppointments(filter: AppointmentFilter): Promise<Appointment[]>
-  createAppointment(appt: NewAppointment): Promise<Appointment>
-  cancelAppointment(id: string, reason: string): Promise<void>
-
-  // Availability
-  getAvailability(providerId: string, dateRange: DateRange): Promise<Slot[]>
+  // Availability & Appointments
+  getAvailability(dateRange: DateRange): Promise<MRSSlot[]>
+  verifySlotAvailable(slotMrsId: string): Promise<SlotVerificationResult>
+  getAppointments(filter: AppointmentFilter): Promise<MRSAppointment[]>
+  createAppointment(request: CreateAppointmentRequest): Promise<MRSAppointment>
+  cancelAppointment(mrsId: string, reason?: string): Promise<void>
 }
 ```
+
+**Supported MRS Systems:** OpenMRS (implemented), Epic, Cerner, athenahealth, OpenEMR (interface defined)
 
 ---
 
@@ -190,42 +199,56 @@ OPENMRS_PASSWORD=<from .env>
 
 ### [6] Sync Service
 
-**Purpose:** Keep Context Store synchronized with MRS data.
+**Purpose:** Keep Context Store synchronized with MRS data with intelligent rate limiting.
 
 **Responsibilities:**
-- Poll MRS for changes on configurable interval (default: 5 minutes)
+- Poll MRS for changes on configurable intervals per entity type
 - Detect and sync new/updated patients, providers, appointments
 - Recompute availability after appointment changes
-- Handle sync conflicts (MRS wins for source-of-truth data)
-- Track sync state for incremental updates
-- Push local appointments to MRS with retry logic
+- Handle sync conflicts with configurable resolution rules
+- Track sync state with rate limit awareness
+- Push local appointments to MRS with retry logic and exponential backoff
+- Detect MRS demo resets and trigger full re-sync
 
 **Dependencies:** MRS Adapter Layer, Context Store
 
-**Key Design:** Polling-based rather than event-driven for simplicity. The MRS is treated as eventually consistent — our Context Store may lag by the sync interval, but real-time writes go through us first, then sync back to MRS.
+**Key Design:** Polling-based with adaptive intervals. During live booking calls, the system uses MRS-first booking (verify slot → create in MRS → record locally). Background sync keeps data fresh and handles the push queue for appointments created during MRS outages.
 
 **Sync Flow:**
 ```
-1. Check last sync timestamp
-2. Fetch changed records from MRS since last sync
-3. Upsert into Context Store
-4. Recompute affected availability
-5. Push local appointments to MRS
-6. Update sync timestamp
+1. Check rate limit state (back off if needed)
+2. Fetch records from MRS
+3. Detect changes via comparison (MRS may not support modified-since)
+4. Apply conflict resolution rules
+5. Upsert into Context Store
+6. Process push queue (local → MRS)
+7. Update sync state and schedule next run
 ```
+
+**Default Sync Intervals:**
+| Entity | Interval | Priority | Rationale |
+|--------|----------|----------|-----------|
+| Availability | 5 min | High | Freshness critical for booking |
+| Appointments | 5 min | High | Detect external changes |
+| Patients | 30 min | Medium | Less volatile data |
+| Providers | 60 min | Low | Rarely changes |
+| Locations | 60 min | Low | Rarely changes |
 
 **Conflict Resolution:**
 - Patient/Provider data: MRS wins (source of truth)
 - Appointments in MRS but not local: Import
 - Appointments local but not in MRS: Flag for review (SyncConflict table)
+- External booking conflicts: Offer alternatives, flag for review
 - Slots deleted in MRS: Mark `mrsExists=false`, prevent new bookings
 
-**Configuration:**
-```
-SYNC_INTERVAL_MS=300000   # 5 minutes (default)
-```
+**Rate Limiting:**
+- Tracks `rateLimitRemaining` and `rateLimitResetAt` per sync state
+- Exponential backoff on consecutive failures
+- Adaptive interval adjustment when quota is low (<20%)
 
-**Implementation:** See `src/sync/service.ts`
+**Configuration:** See Environment Variables section below
+
+**Implementation:** See `src/sync/` directory
 
 ---
 
@@ -406,16 +429,42 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## Environment Variables
 
+### Core Settings
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `VAPI_API_KEY` | Yes | VAPI API key for voice |
 | `VAPI_ASSISTANT_ID` | Yes | VAPI assistant ID (configure in dashboard) |
-| `OPENMRS_URL` | Yes | OpenMRS instance URL |
+| `PORT` | No | Server port (default: 3000) |
+
+### MRS Integration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENMRS_URL` | Yes | OpenMRS instance URL (e.g., `https://demo.openmrs.org/openmrs`) |
 | `OPENMRS_USER` | Yes | OpenMRS username |
 | `OPENMRS_PASSWORD` | Yes | OpenMRS password |
-| `SYNC_INTERVAL_MS` | No | MRS sync interval (default: 300000 = 5 min) |
-| `PORT` | No | Server port (default: 3000) |
+| `OPENMRS_TIMEOUT_MS` | No | Request timeout (default: 30000) |
+
+### Sync Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYNC_AVAILABILITY_INTERVAL_MS` | No | Availability sync interval (default: 300000 = 5 min) |
+| `SYNC_APPOINTMENTS_INTERVAL_MS` | No | Appointments sync interval (default: 300000 = 5 min) |
+| `SYNC_PATIENTS_INTERVAL_MS` | No | Patients sync interval (default: 1800000 = 30 min) |
+| `SYNC_PROVIDERS_INTERVAL_MS` | No | Providers sync interval (default: 3600000 = 60 min) |
+| `SYNC_LOCATIONS_INTERVAL_MS` | No | Locations sync interval (default: 3600000 = 60 min) |
+| `SYNC_FULL_SYNC_TIME` | No | Daily full sync time in 24h format (default: `02:00`) |
+| `SYNC_MAX_CONSECUTIVE_FAILURES` | No | Alert threshold for consecutive failures (default: 5) |
+
+### Booking Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BOOKING_STALE_THRESHOLD_MS` | No | When to warn about stale availability (default: 600000 = 10 min) |
+| `BOOKING_MAX_ALTERNATIVES` | No | Max alternative slots to suggest on conflict (default: 3) |
 
 See `.env.example` for a complete template.
 
@@ -453,18 +502,41 @@ elise-clone/
 │   │   ├── core.ts      # Unified agent logic
 │   │   ├── adapters/    # Channel adapters (vapi, chat)
 │   │   └── tools/       # [2] Scheduling tools
+│   ├── booking/         # MRS-first booking flow
+│   │   └── mrs-booking.ts  # Availability check, book, cancel with MRS
 │   ├── db/              # [3] Context Store
 │   │   ├── schema.ts    # Database schema
 │   │   ├── queries.ts   # Query functions
 │   │   └── jobs.ts      # Job queue implementation
 │   ├── mrs/             # [4] MRS Adapter Layer
-│   │   ├── adapter.ts   # Abstract interface
-│   │   └── openmrs/     # [5] OpenMRS implementation
+│   │   ├── adapter.ts   # Abstract interface with capabilities
+│   │   ├── types.ts     # MRS entity types and capabilities
+│   │   ├── errors.ts    # Typed MRS errors
+│   │   ├── adapters/    # Concrete implementations
+│   │   │   ├── openmrs/ # [5] OpenMRS adapter
+│   │   │   └── mock/    # Mock adapter for testing
+│   │   └── systems/     # MRS system documentation
 │   ├── sync/            # [6] Sync Service
-│   │   └── service.ts   # Sync logic
+│   │   ├── types.ts     # Sync types and config
+│   │   ├── scheduler.ts # Interval-based scheduling
+│   │   ├── change-detection.ts  # Compare MRS vs local
+│   │   ├── conflict-resolution.ts  # Resolution rules
+│   │   ├── rate-limiter.ts  # Rate limit tracking
+│   │   ├── entities/    # Per-entity sync logic
+│   │   ├── push/        # Push local → MRS
+│   │   ├── jobs/        # Sync job handlers
+│   │   ├── metrics.ts   # Observability
+│   │   ├── health.ts    # Health checks
+│   │   └── demo-reset.ts  # Demo reset detection
 │   ├── waitlist/        # [7] Waitlist Scheduler
 │   │   └── scheduler.ts # Outbound call logic
 │   └── server.ts        # HTTP server (Express/Fastify)
+├── test/                # Test files
+│   ├── change-detection.test.ts
+│   ├── conflict-resolution.test.ts
+│   ├── mock-adapter.test.ts
+│   ├── openmrs-integration.test.ts
+│   └── booking-flow.test.ts
 ├── openspec/            # Specifications and changes
 ├── docker-compose.yml   # Local development
 ├── fly.toml             # Fly.io config

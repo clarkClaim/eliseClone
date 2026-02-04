@@ -208,7 +208,12 @@ enum JobStatus {
 
 model Job {
   id              String    @id @default(uuid())
-  type            String // 'sync_mrs', 'send_reminder', 'waitlist_outbound_call', 'send_confirmation_sms', 'sync_appointment_push'
+  // Job types:
+  // Sync: 'sync_patients', 'sync_providers', 'sync_availability', 'sync_appointments'
+  // Push to MRS: 'push_appointment_to_mrs', 'push_cancellation_to_mrs'
+  // Notifications: 'send_reminder', 'send_confirmation_sms'
+  // Waitlist: 'waitlist_outbound_call'
+  type            String
   payload         Json      @default("{}")
   status          JobStatus @default(pending)
   priority        Int       @default(0) // Higher = process first
@@ -271,6 +276,37 @@ model Escalation {
 }
 
 // ============================================
+// MRS CONFIGURATION
+// ============================================
+
+enum MrsSystemType {
+  openmrs
+  epic
+  cerner
+  athena
+  openemr
+
+  @@map("mrs_system_type")
+}
+
+model MrsConfig {
+  id                   String        @id @default(uuid())
+  tenantId             String        @unique @map("tenant_id") // Tenant identifier
+  systemType           MrsSystemType @map("system_type")
+  baseUrl              String        @map("base_url")
+  credentials          String        @map("credentials") // Encrypted JSON (username/password, OAuth tokens, etc.)
+  capabilitiesOverride Json?         @map("capabilities_override") // Override discovered capabilities
+  // Health tracking
+  lastHealthCheckAt    DateTime?     @map("last_health_check_at")
+  isHealthy            Boolean       @default(true) @map("is_healthy")
+  avgLatencyMs         Int?          @map("avg_latency_ms")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  @@map("mrs_config")
+}
+
+// ============================================
 // SYNC STATE & CONFLICTS
 // ============================================
 
@@ -302,6 +338,10 @@ model SyncState {
   lastSyncDuration    Int?      @map("last_sync_duration") // Duration in milliseconds
   recordsProcessed    Int       @default(0) @map("records_processed") // Records in last sync
   consecutiveFailures Int       @default(0) @map("consecutive_failures") // For alerting
+  // Rate limit tracking
+  rateLimitRemaining  Int?      @map("rate_limit_remaining") // Remaining requests before limit
+  rateLimitResetAt    DateTime? @map("rate_limit_reset_at") // When rate limit resets
+  backoffUntil        DateTime? @map("backoff_until") // Don't sync until this time (rate limited)
 
   @@map("sync_state")
 }

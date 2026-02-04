@@ -1612,3 +1612,161 @@ Assistant: [calls check_availability] I don't have anything this week. The earli
 Patient: Both, actually.
 Assistant: [calls book_appointment] You're set for Tuesday at 10 AM. [calls add_to_waitlist] And you're on the waitlist—we'll call if something opens up sooner.
 ```
+
+---
+
+## 8. MRS Adapter Architecture
+
+### Overview
+
+The MRS Adapter provides an abstraction layer between our system and Medical Record Systems. This enables:
+- Support for multiple MRS backends (OpenMRS, Epic, Cerner, athenahealth, OpenEMR)
+- Capability-aware operations (check what an MRS supports before attempting)
+- Consistent error handling across different systems
+- MRS-first booking during live calls with graceful degradation
+
+### Adapter Interface
+
+All MRS adapters implement the `MRSAdapter` interface (`src/mrs/adapter.ts`):
+
+```typescript
+interface MRSAdapter {
+  // Identity
+  readonly systemType: 'openmrs' | 'epic' | 'cerner' | 'athena' | 'openemr';
+  readonly capabilities: MRSCapabilities;
+
+  // Connection management
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  healthCheck(): Promise<HealthCheckResult>;
+
+  // Read operations (for sync)
+  getPatients(options?: { since?: Date; limit?: number }): Promise<MRSPatient[]>;
+  getProviders(): Promise<MRSProvider[]>;
+  getLocations(): Promise<MRSLocation[]>;
+  getAppointmentTypes(): Promise<MRSAppointmentType[]>;
+  getAvailability(range: DateRange): Promise<MRSSlot[]>;
+  getAppointments(filter: AppointmentFilter): Promise<MRSAppointment[]>;
+
+  // Real-time validation
+  verifySlotAvailable(slotId: string): Promise<SlotVerificationResult>;
+
+  // Write operations
+  createAppointment(request: NewAppointment): Promise<MRSAppointment>;
+  cancelAppointment(mrsId: string, reason?: string): Promise<void>;
+  updateAppointmentStatus(mrsId: string, status: string): Promise<void>;
+}
+```
+
+### Capability Discovery
+
+Each adapter declares its capabilities, allowing the booking flow to adapt:
+
+```typescript
+interface MRSCapabilities {
+  patientSearch: {
+    byPhone: boolean;    // Can search by phone number
+    byName: boolean;     // Can search by name
+    byDOB: boolean;      // Can search by date of birth
+    byIdentifier: boolean;
+    globalSearch: boolean;
+  };
+
+  appointments: {
+    canCreate: boolean;
+    canCancel: boolean;
+    canReschedule: boolean;  // false for OpenMRS (must cancel + create)
+    canQueryByDateRange: boolean;
+    canQueryByPatient: boolean;
+    supportsStatuses: string[];
+  };
+
+  sync: {
+    supportsIncrementalSync: boolean;  // Has modified-since query
+    supportsWebhooks: boolean;         // Can push change notifications
+    hasModifiedSinceQuery: boolean;
+  };
+
+  rateLimits: {
+    requestsPerMinute: number | null;
+    requestsPerHour: number | null;
+    burstLimit: number | null;
+    perEndpointLimits: Record<string, number>;
+  };
+}
+```
+
+### MRS-First Booking Flow
+
+During live voice/chat calls, we use MRS-first booking for interactive conflict resolution:
+
+```
+Patient: "I'll take the 2pm slot"
+       │
+       ▼
+  1. VERIFY SLOT (real-time MRS call)
+       │
+       ├── AVAILABLE → 2. CREATE IN MRS
+       │                      │
+       │                      ├── SUCCESS → 3. RECORD LOCALLY → 4. CONFIRM
+       │                      │
+       │                      └── FAILURE
+       │                            ├── CONFLICT → Retry with alternatives
+       │                            └── TIMEOUT → DEGRADE to local booking
+       │
+       └── NOT AVAILABLE → "Sorry, that was just taken. I have 2:30pm and 3pm..."
+```
+
+### Graceful Degradation
+
+When MRS is unavailable, we fall back to local-first booking:
+
+1. Book locally with `syncedToMrs = false`
+2. Queue a push job with high priority
+3. Inform patient: "You're booked. Confirmation pending system sync."
+4. Push job retries with exponential backoff
+
+### Error Types
+
+The adapter defines typed errors for consistent handling:
+
+| Error | HTTP Status | Retryable | Description |
+|-------|-------------|-----------|-------------|
+| `MRSAuthenticationError` | 401 | No | Invalid credentials |
+| `MRSRateLimitError` | 429 | Yes | Rate limit exceeded |
+| `MRSTimeoutError` | - | Yes | Request timed out |
+| `MRSUnavailableError` | 5xx | Yes | Server error |
+| `SlotConflictError` | 409 | No | Slot already booked |
+| `SlotNotFoundError` | 404 | No | Slot doesn't exist |
+
+### Directory Structure
+
+```
+src/mrs/
+├── adapter.ts           # MRSAdapter interface
+├── types.ts             # MRSCapabilities, entity types
+├── errors.ts            # Error classes
+├── index.ts             # Exports
+├── systems/
+│   └── README.md        # MRS system reference docs
+└── adapters/
+    ├── openmrs/         # OpenMRS implementation
+    │   ├── adapter.ts
+    │   ├── client.ts
+    │   ├── capabilities.ts
+    │   ├── mappers.ts
+    │   └── index.ts
+    └── mock/            # Mock adapter for testing
+        ├── adapter.ts
+        └── index.ts
+```
+
+### Adding a New MRS Adapter
+
+1. Create directory: `src/mrs/adapters/{systemname}/`
+2. Implement `MRSAdapter` interface
+3. Define capabilities in `capabilities.ts`
+4. Create data mappers for the MRS's response format
+5. Handle authentication in `client.ts`
+6. Export via `index.ts`
+7. Update `src/mrs/systems/README.md` with system details
