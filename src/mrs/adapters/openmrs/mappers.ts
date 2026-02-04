@@ -143,6 +143,70 @@ export function mapPatientList(response: { results: OpenMRSPatientResponse[] }):
 }
 
 // ============================================
+// FHIR Patient Mappers (for bulk listing)
+// ============================================
+
+interface FHIRPatientResource {
+  id: string;
+  name?: Array<{
+    text?: string;
+    family?: string;
+    given?: string[];
+  }>;
+  gender?: string;
+  birthDate?: string;
+  telecom?: Array<{
+    system?: string;
+    value?: string;
+    use?: string;
+  }>;
+}
+
+interface FHIRBundle {
+  entry?: Array<{
+    resource: FHIRPatientResource;
+  }>;
+  link?: Array<{
+    relation: string;
+    url: string;
+  }>;
+  total?: number;
+}
+
+export function mapFhirPatient(resource: FHIRPatientResource): MRSPatient {
+  const name = resource.name?.[0];
+  const phoneNumbers: MRSPhoneNumber[] = (resource.telecom ?? [])
+    .filter(t => t.system === 'phone' && t.value)
+    .map((t, index) => ({
+      phone: t.value!,
+      phoneType: t.use === 'mobile' ? 'mobile' : 'home',
+      isPrimary: index === 0,
+    }));
+
+  return {
+    mrsId: resource.id,
+    name: name?.text ?? `${name?.given?.join(' ') ?? ''} ${name?.family ?? ''}`.trim(),
+    givenName: name?.given?.[0],
+    familyName: name?.family,
+    dateOfBirth: resource.birthDate ? new Date(resource.birthDate) : undefined,
+    gender: resource.gender,
+    phoneNumbers,
+  };
+}
+
+export function mapFhirPatientBundle(bundle: FHIRBundle): MRSPatient[] {
+  if (!bundle.entry) {
+    return [];
+  }
+  return bundle.entry.map(entry => mapFhirPatient(entry.resource));
+}
+
+export function getFhirNextPageUrl(bundle: FHIRBundle): string | null {
+  const nextLink = bundle.link?.find(l => l.relation === 'next');
+  return nextLink?.url ?? null;
+}
+
+// ============================================
 // Provider Mappers
 // ============================================
 

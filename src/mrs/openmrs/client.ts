@@ -54,6 +54,15 @@ export class OpenMRSClient {
     await this.request<void>('DELETE', path);
   }
 
+  /**
+   * Validate connection by fetching session info.
+   * @throws AuthenticationError if credentials are invalid
+   */
+  async validateConnection(): Promise<boolean> {
+    const response = await this.get<{ authenticated: boolean }>('/session');
+    return response?.authenticated ?? false;
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${this.baseUrl}/ws/rest/v1${path}`;
     let lastError: Error | null = null;

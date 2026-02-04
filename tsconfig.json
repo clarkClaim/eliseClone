@@ -16,5 +16,13 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/sync/entities",
+    "src/sync/jobs",
+    "src/sync/push",
+    "src/sync/health.ts",
+    "src/sync/scheduler.ts"
+  ]
 }

@@ -20,10 +20,11 @@ import type {
 } from '../../types.js';
 import { NotFoundError, MRSValidationError, SlotConflictError, SlotNotFoundError } from '../../errors.js';
 import { OpenMRSClient, type OpenMRSClientConfig } from './client.js';
-import { OPENMRS_CAPABILITIES, REVERSE_STATUS_MAP } from './capabilities.js';
+import { OPENMRS_CAPABILITIES, OPENMRS_CAPABILITIES_NO_APPOINTMENTS, REVERSE_STATUS_MAP } from './capabilities.js';
 import {
   mapPatient,
   mapPatientList,
+  mapFhirPatientBundle,
   mapProvider,
   mapProviderList,
   mapLocation,
@@ -48,11 +49,12 @@ const DEFAULT_MAX_RESULTS = 100;
 
 export class OpenMRSAdapter implements MRSAdapter {
   readonly systemType: MRSSystemType = 'openmrs';
-  readonly capabilities: MRSCapabilities = OPENMRS_CAPABILITIES;
+  capabilities: MRSCapabilities = OPENMRS_CAPABILITIES;
 
   private readonly client: OpenMRSClient;
   private readonly maxResults: number;
   private connected = false;
+  private appointmentModuleAvailable = true;
 
   constructor(config: OpenMRSAdapterConfig) {
     this.client = new OpenMRSClient({
@@ -99,7 +101,31 @@ export class OpenMRSAdapter implements MRSAdapter {
     if (!authenticated) {
       throw new Error('OpenMRS authentication failed');
     }
+
+    // Probe for appointment scheduling module availability
+    await this.detectAppointmentModule();
+
     this.connected = true;
+  }
+
+  /**
+   * Detect if the appointment scheduling module is installed.
+   * If not, adjust capabilities accordingly.
+   */
+  private async detectAppointmentModule(): Promise<void> {
+    try {
+      // Try to access the appointment types endpoint as a probe
+      const response = await this.client.get<unknown>(
+        '/appointmentscheduling/appointmenttype?limit=1'
+      );
+      // If we get here without error, module is available
+      this.appointmentModuleAvailable = response !== null;
+    } catch {
+      // Module not available - use limited capabilities
+      console.log('[OpenMRSAdapter] Appointment scheduling module not available - running in limited mode');
+      this.appointmentModuleAvailable = false;
+      this.capabilities = OPENMRS_CAPABILITIES_NO_APPOINTMENTS;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -113,6 +139,9 @@ export class OpenMRSAdapter implements MRSAdapter {
       return {
         healthy: true,
         latencyMs: Date.now() - start,
+        details: {
+          appointmentModuleAvailable: this.appointmentModuleAvailable,
+        },
       };
     } catch {
       return {
@@ -120,6 +149,14 @@ export class OpenMRSAdapter implements MRSAdapter {
         latencyMs: Date.now() - start,
       };
     }
+  }
+
+  /**
+   * Check if appointment scheduling module is available.
+   * If not, appointments and availability sync will be skipped.
+   */
+  hasAppointmentSupport(): boolean {
+    return this.appointmentModuleAvailable;
   }
 
   // ============================================
@@ -153,16 +190,18 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   async getPatients(options?: { since?: Date; limit?: number }): Promise<MRSPatient[]> {
+    // OpenMRS REST API doesn't support listing all patients without a search query.
+    // Use FHIR API instead which supports bulk listing.
     const limit = options?.limit ?? this.maxResults;
-    const response = await this.client.get<unknown>(
-      `/patient?v=default&limit=${limit}`
+    const response = await this.client.getFhir<unknown>(
+      `/Patient?_count=${limit}`
     );
 
     if (!response) {
       return [];
     }
 
-    return mapPatientList(response as Parameters<typeof mapPatientList>[0]);
+    return mapFhirPatientBundle(response as Parameters<typeof mapFhirPatientBundle>[0]);
   }
 
   // ============================================
@@ -202,6 +241,10 @@ export class OpenMRSAdapter implements MRSAdapter {
   // ============================================
 
   async getAppointmentTypes(): Promise<MRSAppointmentType[]> {
+    if (!this.appointmentModuleAvailable) {
+      return [];
+    }
+
     const response = await this.client.get<unknown>(
       `/appointmentscheduling/appointmenttype?v=default&limit=${this.maxResults}`
     );
@@ -216,6 +259,12 @@ export class OpenMRSAdapter implements MRSAdapter {
   // ============================================
 
   async getAvailability(range: DateRange): Promise<MRSSlot[]> {
+    if (!this.appointmentModuleAvailable) {
+      // Appointment scheduling module not available - return empty
+      // Availability must be managed locally
+      return [];
+    }
+
     const params = new URLSearchParams();
     params.set('fromDate', this.formatDate(range.start));
     params.set('toDate', this.formatDate(range.end));
@@ -232,6 +281,10 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   async getProviderAvailability(providerMrsId: string, dateRange: DateRange): Promise<MRSSlot[]> {
+    if (!this.appointmentModuleAvailable) {
+      return [];
+    }
+
     const params = new URLSearchParams();
     params.set('provider', providerMrsId);
     params.set('fromDate', this.formatDate(dateRange.start));
@@ -253,6 +306,12 @@ export class OpenMRSAdapter implements MRSAdapter {
   // ============================================
 
   async verifySlotAvailable(slotId: string): Promise<SlotVerificationResult> {
+    if (!this.appointmentModuleAvailable) {
+      // Without appointment module, always return available
+      // Local system manages availability
+      return { available: true };
+    }
+
     const response = await this.client.get<unknown>(
       `/appointmentscheduling/timeslot/${slotId}`
     );
@@ -273,6 +332,12 @@ export class OpenMRSAdapter implements MRSAdapter {
   // ============================================
 
   async getAppointments(filter: AppointmentFilter): Promise<MRSAppointment[]> {
+    if (!this.appointmentModuleAvailable) {
+      // Appointment scheduling module not available
+      // Appointments are managed locally only
+      return [];
+    }
+
     const params = new URLSearchParams();
     params.set('fromDate', this.formatDate(filter.startDate));
     params.set('toDate', this.formatDate(filter.endDate));
@@ -300,6 +365,10 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   async createAppointment(appointment: NewAppointment): Promise<MRSAppointment> {
+    if (!this.appointmentModuleAvailable) {
+      throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
+    }
+
     const slotVerification = await this.verifySlotAvailable(appointment.slotMrsId);
     if (!slotVerification.available) {
       throw new SlotConflictError(appointment.slotMrsId);
@@ -326,6 +395,10 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   async cancelAppointment(mrsId: string, reason?: string): Promise<void> {
+    if (!this.appointmentModuleAvailable) {
+      throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
+    }
+
     const existing = await this.client.get<unknown>(
       `/appointmentscheduling/appointment/${mrsId}`
     );
@@ -341,6 +414,10 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   async updateAppointmentStatus(mrsId: string, status: string): Promise<void> {
+    if (!this.appointmentModuleAvailable) {
+      throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
+    }
+
     const existing = await this.client.get<unknown>(
       `/appointmentscheduling/appointment/${mrsId}`
     );

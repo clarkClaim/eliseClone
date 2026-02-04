@@ -188,12 +188,12 @@ interface MRSAdapter {
 
 **Configuration:**
 ```
-OPENMRS_URL=https://demo.openmrs.org/openmrs
+OPENMRS_URL=https://o3.openmrs.org/openmrs
 OPENMRS_USER=admin
-OPENMRS_PASSWORD=<from .env>
+OPENMRS_PASSWORD=Admin123
 ```
 
-**Note:** Using the public OpenMRS demo instance. Data may reset periodically — this is acceptable for demo purposes.
+**Note:** Using the public OpenMRS 3 demo instance at `o3.openmrs.org`. Data may reset periodically — this is acceptable for demo purposes.
 
 ---
 
@@ -442,7 +442,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENMRS_URL` | Yes | OpenMRS instance URL (e.g., `https://demo.openmrs.org/openmrs`) |
+| `OPENMRS_URL` | Yes | OpenMRS instance URL (e.g., `https://o3.openmrs.org/openmrs`) |
 | `OPENMRS_USER` | Yes | OpenMRS username |
 | `OPENMRS_PASSWORD` | Yes | OpenMRS password |
 | `OPENMRS_TIMEOUT_MS` | No | Request timeout (default: 30000) |

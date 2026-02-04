@@ -295,7 +295,7 @@ export class SyncService {
       const seenMrsIds = new Set<string>();
 
       for (const provider of providers) {
-        const slots = await this.adapter.getAvailability(provider.mrsId, dateRange);
+        const slots = await this.adapter.getProviderAvailability(provider.mrsId, dateRange);
 
         for (const slot of slots) {
           seenMrsIds.add(slot.mrsId);
@@ -689,7 +689,7 @@ export class SyncService {
         end: slot.endTime,
       };
 
-      const mrsSlots = await this.adapter.getAvailability(slot.provider.mrsId, dateRange);
+      const mrsSlots = await this.adapter.getProviderAvailability(slot.provider.mrsId, dateRange);
       const mrsSlot = mrsSlots.find(s => s.mrsId === slot.mrsId);
 
       if (!mrsSlot) {

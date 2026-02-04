@@ -125,7 +125,7 @@ export async function processCancellationJobs(adapter: MRSAdapter, limit = 10): 
       },
     });
 
-    const payload = job.payload as CancellationPushPayload;
+    const payload = job.payload as unknown as CancellationPushPayload;
     const result = await pushCancellationToMRS(
       adapter,
       payload.appointmentId,

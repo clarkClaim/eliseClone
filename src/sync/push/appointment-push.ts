@@ -166,7 +166,7 @@ export async function processPushJobs(adapter: MRSAdapter, limit = 10): Promise<
       },
     });
 
-    const payload = job.payload as PushJobPayload;
+    const payload = job.payload as unknown as PushJobPayload;
     const result = await pushAppointmentToMRS(adapter, payload.appointmentId);
 
     if (result.success) {

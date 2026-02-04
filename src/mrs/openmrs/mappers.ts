@@ -5,6 +5,7 @@ import type {
   MRSPatient,
   MRSPhoneNumber,
   MRSProvider,
+  MRSLocation,
   MRSAppointment,
   MRSAppointmentStatus,
   MRSSlot,
@@ -131,6 +132,41 @@ export function mapProvider(response: OpenMRSProviderResponse): MRSProvider {
 
 export function mapProviderList(response: { results: OpenMRSProviderResponse[] }): MRSProvider[] {
   return response.results.map(mapProvider);
+}
+
+// ============================================
+// Location Mappers
+// ============================================
+
+interface OpenMRSLocationResponse {
+  uuid: string;
+  display: string;
+  name: string;
+  address1?: string;
+  address2?: string;
+  cityVillage?: string;
+  stateProvince?: string;
+  postalCode?: string;
+}
+
+export function mapLocation(response: OpenMRSLocationResponse): MRSLocation {
+  const addressParts = [
+    response.address1,
+    response.address2,
+    response.cityVillage,
+    response.stateProvince,
+    response.postalCode,
+  ].filter(Boolean);
+
+  return {
+    mrsId: response.uuid,
+    name: response.name || response.display,
+    address: addressParts.length > 0 ? addressParts.join(', ') : undefined,
+  };
+}
+
+export function mapLocationList(response: { results: OpenMRSLocationResponse[] }): MRSLocation[] {
+  return response.results.map(mapLocation);
 }
 
 // ============================================

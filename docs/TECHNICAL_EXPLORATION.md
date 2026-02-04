@@ -22,7 +22,7 @@ This document captures research findings from deep-diving each external dependen
 
 OpenMRS provides a REST API for patient management and appointment scheduling via an optional module. The appointment scheduling module is separate from core OpenMRS and must be installed.
 
-**Base URL:** `https://demo.openmrs.org/openmrs/ws/rest/v1/`
+**Base URL:** `https://o3.openmrs.org/openmrs/ws/rest/v1/`
 **Auth:** Basic Authentication (base64 encoded `username:password`)
 
 ### Key Resources

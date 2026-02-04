@@ -60,6 +60,14 @@ export class OpenMRSClient {
   }
 
   /**
+   * Make a GET request to the OpenMRS FHIR API.
+   * FHIR is used for bulk patient listing since REST API doesn't support it.
+   */
+  async getFhir<T>(path: string): Promise<T> {
+    return this.request<T>('GET', path, undefined, true);
+  }
+
+  /**
    * Make a POST request to the OpenMRS REST API.
    */
   async post<T>(path: string, body: unknown): Promise<T> {
@@ -82,8 +90,9 @@ export class OpenMRSClient {
     return response?.authenticated ?? false;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const url = `${this.baseUrl}/ws/rest/v1${path}`;
+  private async request<T>(method: string, path: string, body?: unknown, useFhir = false): Promise<T> {
+    const apiPath = useFhir ? '/ws/fhir2/R4' : '/ws/rest/v1';
+    const url = `${this.baseUrl}${apiPath}${path}`;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {

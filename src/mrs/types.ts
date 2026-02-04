@@ -158,4 +158,5 @@ export interface SlotVerificationResult {
 export interface HealthCheckResult {
   healthy: boolean;
   latencyMs: number;
+  details?: Record<string, unknown>;
 }

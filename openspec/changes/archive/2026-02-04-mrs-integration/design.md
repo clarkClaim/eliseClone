@@ -2,7 +2,7 @@
 
 Phase 1 established the database schema with tables for patients, providers, appointments, availability, waitlist, and jobs. The system can store scheduling data but has no connection to OpenMRS. Currently, there is no patient/provider data and no mechanism to sync appointments bidirectionally.
 
-The OpenMRS demo instance (demo.openmrs.org) provides a REST API for patient, provider, and appointment data. The demo resets periodically, which is acceptable for this implementation.
+The OpenMRS 3 demo instance (o3.openmrs.org) provides REST and FHIR APIs for patient, provider, and appointment data. The demo resets periodically, which is acceptable for this implementation.
 
 Key constraints:
 - MRS is the source of truth for patient demographics
