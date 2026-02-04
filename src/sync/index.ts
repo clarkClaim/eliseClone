@@ -1,3 +1,3 @@
 // Sync Service - keeps Context Store synchronized with MRS
-// TODO: Implement polling-based sync jobs
-export {};
+export { SyncService } from './service.js';
+export type { SyncServiceConfig } from './service.js';

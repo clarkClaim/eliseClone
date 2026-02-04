@@ -91,17 +91,19 @@ model AppointmentType {
 // ============================================
 
 model Availability {
-  id                String   @id @default(uuid())
-  mrsId             String?  @unique @map("mrs_id") // OpenMRS timeslot UUID (nullable for locally-created)
-  providerId        String   @map("provider_id")
-  locationId        String?  @map("location_id")
-  appointmentTypeId String?  @map("appointment_type_id")
-  startTime         DateTime @map("start_time")
-  endTime           DateTime @map("end_time")
-  isBooked          Boolean  @default(false) @map("is_booked")
-  version           Int      @default(1) // Optimistic locking
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                String    @id @default(uuid())
+  mrsId             String?   @unique @map("mrs_id") // OpenMRS timeslot UUID (nullable for locally-created)
+  providerId        String    @map("provider_id")
+  locationId        String?   @map("location_id")
+  appointmentTypeId String?   @map("appointment_type_id")
+  startTime         DateTime  @map("start_time")
+  endTime           DateTime  @map("end_time")
+  isBooked          Boolean   @default(false) @map("is_booked")
+  version           Int       @default(1) // Optimistic locking
+  mrsUpdatedAt      DateTime? @map("mrs_updated_at") // When MRS last modified this
+  mrsExists         Boolean   @default(true) @map("mrs_exists") // False if slot deleted from MRS
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   provider        Provider         @relation(fields: [providerId], references: [id])
   location        Location?        @relation(fields: [locationId], references: [id])
@@ -133,6 +135,12 @@ model Appointment {
   reason       String?
   cancelReason String?           @map("cancel_reason")
   bookedVia    String            @default("voice") @map("booked_via") // 'voice', 'chat', 'sync', 'admin'
+  // MRS sync tracking
+  mrsUpdatedAt DateTime?         @map("mrs_updated_at") // When MRS last modified this
+  syncedToMrs  Boolean           @default(false) @map("synced_to_mrs") // Has been pushed to MRS
+  syncedToMrsAt DateTime?        @map("synced_to_mrs_at") // When last synced to MRS
+  lastSyncError String?          @map("last_sync_error") // Error message from last sync attempt
+  syncAttempts Int               @default(0) @map("sync_attempts") // Number of push attempts
   createdAt    DateTime          @default(now()) @map("created_at")
   updatedAt    DateTime          @updatedAt @map("updated_at")
 
@@ -141,6 +149,7 @@ model Appointment {
 
   @@index([patientId, status])
   @@index([status])
+  @@index([syncedToMrs]) // For finding appointments to push to MRS
   @@map("appointments")
 }
 
@@ -198,19 +207,22 @@ enum JobStatus {
 }
 
 model Job {
-  id          String    @id @default(uuid())
-  type        String // 'sync_mrs', 'send_reminder', 'waitlist_outbound_call', 'send_confirmation_sms'
-  payload     Json      @default("{}")
-  status      JobStatus @default(pending)
-  priority    Int       @default(0) // Higher = process first
-  runAt       DateTime  @default(now()) @map("run_at")
-  startedAt   DateTime? @map("started_at")
-  completedAt DateTime? @map("completed_at")
-  attempts    Int       @default(0)
-  maxAttempts Int       @default(3) @map("max_attempts")
-  lastError   String?   @map("last_error")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id              String    @id @default(uuid())
+  type            String // 'sync_mrs', 'send_reminder', 'waitlist_outbound_call', 'send_confirmation_sms', 'sync_appointment_push'
+  payload         Json      @default("{}")
+  status          JobStatus @default(pending)
+  priority        Int       @default(0) // Higher = process first
+  runAt           DateTime  @default(now()) @map("run_at")
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3) @map("max_attempts")
+  lastError       String?   @map("last_error")
+  // Exponential backoff for retries
+  backoffExponent Int       @default(1) @map("backoff_exponent")
+  nextRetryAt     DateTime? @map("next_retry_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@index([status, runAt, priority(sort: Desc)]) // For pending job lookup
   @@map("jobs")
@@ -259,15 +271,37 @@ model Escalation {
 }
 
 // ============================================
-// SYNC STATE
+// SYNC STATE & CONFLICTS
 // ============================================
 
+model SyncConflict {
+  id           String    @id @default(uuid())
+  entityType   String    @map("entity_type") // 'patient', 'provider', 'appointment', 'availability'
+  entityId     String    @map("entity_id") // Local entity ID
+  mrsId        String?   @map("mrs_id") // MRS entity ID
+  conflictType String    @map("conflict_type") // 'local_only', 'mrs_only', 'data_diverged', 'deleted_in_mrs'
+  localState   Json      @map("local_state") // Snapshot of local data
+  mrsState     Json?     @map("mrs_state") // Snapshot of MRS data (if available)
+  resolution   String    @map("resolution") // Description of resolution taken
+  detectedAt   DateTime  @default(now()) @map("detected_at")
+  resolvedAt   DateTime? @map("resolved_at")
+
+  @@index([entityType, entityId])
+  @@index([conflictType])
+  @@map("sync_conflicts")
+}
+
 model SyncState {
-  entityType     String    @id @map("entity_type") // 'patients', 'providers', 'appointments', 'timeslots'
-  lastSyncAt     DateTime? @map("last_sync_at")
-  lastSyncCursor String?   @map("last_sync_cursor") // For pagination/incremental sync
-  syncStatus     String    @default("idle") @map("sync_status") // 'idle', 'running', 'failed'
-  lastError      String?   @map("last_error")
+  entityType          String    @id @map("entity_type") // 'patients', 'providers', 'appointments', 'timeslots'
+  lastSyncAt          DateTime? @map("last_sync_at")
+  lastSyncCursor      String?   @map("last_sync_cursor") // For pagination/incremental sync
+  syncStatus          String    @default("idle") @map("sync_status") // 'idle', 'running', 'failed'
+  lastError           String?   @map("last_error")
+  // Observability fields
+  nextSyncAt          DateTime? @map("next_sync_at") // When next sync is scheduled
+  lastSyncDuration    Int?      @map("last_sync_duration") // Duration in milliseconds
+  recordsProcessed    Int       @default(0) @map("records_processed") // Records in last sync
+  consecutiveFailures Int       @default(0) @map("consecutive_failures") // For alerting
 
   @@map("sync_state")
 }

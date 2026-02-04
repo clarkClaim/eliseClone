@@ -193,11 +193,12 @@ OPENMRS_PASSWORD=<from .env>
 **Purpose:** Keep Context Store synchronized with MRS data.
 
 **Responsibilities:**
-- Poll MRS for changes on configurable interval (default: 5-10 minutes)
+- Poll MRS for changes on configurable interval (default: 5 minutes)
 - Detect and sync new/updated patients, providers, appointments
 - Recompute availability after appointment changes
 - Handle sync conflicts (MRS wins for source-of-truth data)
 - Track sync state for incremental updates
+- Push local appointments to MRS with retry logic
 
 **Dependencies:** MRS Adapter Layer, Context Store
 
@@ -209,8 +210,22 @@ OPENMRS_PASSWORD=<from .env>
 2. Fetch changed records from MRS since last sync
 3. Upsert into Context Store
 4. Recompute affected availability
-5. Update sync timestamp
+5. Push local appointments to MRS
+6. Update sync timestamp
 ```
+
+**Conflict Resolution:**
+- Patient/Provider data: MRS wins (source of truth)
+- Appointments in MRS but not local: Import
+- Appointments local but not in MRS: Flag for review (SyncConflict table)
+- Slots deleted in MRS: Mark `mrsExists=false`, prevent new bookings
+
+**Configuration:**
+```
+SYNC_INTERVAL_MS=300000   # 5 minutes (default)
+```
+
+**Implementation:** See `src/sync/service.ts`
 
 ---
 
