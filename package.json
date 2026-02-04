@@ -1,0 +1,35 @@
+{
+  "name": "elise-clone",
+  "version": "0.1.0",
+  "description": "AI-powered healthcare scheduling assistant with voice and chat interfaces",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio"
+  },
+  "keywords": [
+    "healthcare",
+    "scheduling",
+    "voice-ai",
+    "vapi"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "dotenv": "^17.2.3",
+    "prisma": "^7.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.3.0"
+  }
+}

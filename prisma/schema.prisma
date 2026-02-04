@@ -1,0 +1,273 @@
+// Elise Clone - Healthcare Scheduling System
+// Schema based on TECHNICAL_EXPLORATION.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// CORE ENTITIES (synced from OpenMRS)
+// ============================================
+
+model Patient {
+  id         String   @id @default(uuid())
+  mrsId      String   @unique @map("mrs_id") // OpenMRS patient UUID
+  name       String
+  givenName  String?  @map("given_name")
+  familyName String?  @map("family_name")
+  dob        DateTime? @db.Date
+  gender     String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  phones         PatientPhone[]
+  appointments   Appointment[]
+  waitlistEntries WaitlistEntry[]
+  conversations  Conversation[]
+  escalations    Escalation[]
+
+  @@map("patients")
+}
+
+model PatientPhone {
+  patientId String  @map("patient_id")
+  phone     String
+  phoneType String? @map("phone_type") // 'mobile', 'home', 'work'
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@id([patientId, phone])
+  @@index([phone]) // For caller ID lookup
+  @@map("patient_phones")
+}
+
+model Provider {
+  id        String   @id @default(uuid())
+  mrsId     String   @unique @map("mrs_id") // OpenMRS provider UUID
+  name      String
+  specialty String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  availability    Availability[]
+  waitlistEntries WaitlistEntry[]
+
+  @@map("providers")
+}
+
+model Location {
+  id        String   @id @default(uuid())
+  mrsId     String   @unique @map("mrs_id") // OpenMRS location UUID
+  name      String
+  address   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  availability Availability[]
+
+  @@map("locations")
+}
+
+model AppointmentType {
+  id              String  @id @default(uuid())
+  mrsId           String  @unique @map("mrs_id")
+  name            String
+  durationMinutes Int?    @map("duration_minutes")
+  description     String?
+
+  availability    Availability[]
+  waitlistEntries WaitlistEntry[]
+
+  @@map("appointment_types")
+}
+
+// ============================================
+// SCHEDULING
+// ============================================
+
+model Availability {
+  id                String   @id @default(uuid())
+  mrsId             String?  @unique @map("mrs_id") // OpenMRS timeslot UUID (nullable for locally-created)
+  providerId        String   @map("provider_id")
+  locationId        String?  @map("location_id")
+  appointmentTypeId String?  @map("appointment_type_id")
+  startTime         DateTime @map("start_time")
+  endTime           DateTime @map("end_time")
+  isBooked          Boolean  @default(false) @map("is_booked")
+  version           Int      @default(1) // Optimistic locking
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  provider        Provider         @relation(fields: [providerId], references: [id])
+  location        Location?        @relation(fields: [locationId], references: [id])
+  appointmentType AppointmentType? @relation(fields: [appointmentTypeId], references: [id])
+  appointment     Appointment?
+
+  @@index([providerId, startTime, isBooked]) // For availability search
+  @@map("availability")
+}
+
+enum AppointmentStatus {
+  scheduled
+  confirmed
+  arrived
+  in_service
+  completed
+  cancelled
+  no_show
+
+  @@map("appointment_status")
+}
+
+model Appointment {
+  id           String            @id @default(uuid())
+  mrsId        String?           @unique @map("mrs_id") // OpenMRS appointment UUID
+  patientId    String            @map("patient_id")
+  slotId       String            @unique @map("slot_id")
+  status       AppointmentStatus @default(scheduled)
+  reason       String?
+  cancelReason String?           @map("cancel_reason")
+  bookedVia    String            @default("voice") @map("booked_via") // 'voice', 'chat', 'sync', 'admin'
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  patient Patient      @relation(fields: [patientId], references: [id])
+  slot    Availability @relation(fields: [slotId], references: [id])
+
+  @@index([patientId, status])
+  @@index([status])
+  @@map("appointments")
+}
+
+// ============================================
+// WAITLIST
+// ============================================
+
+enum WaitlistStatus {
+  waiting
+  offered
+  booked
+  declined
+  expired
+
+  @@map("waitlist_status")
+}
+
+model WaitlistEntry {
+  id                  String         @id @default(uuid())
+  patientId           String         @map("patient_id")
+  providerId          String?        @map("provider_id") // NULL = any provider
+  appointmentTypeId   String?        @map("appointment_type_id")
+  preferredDateStart  DateTime?      @map("preferred_date_start") @db.Date
+  preferredDateEnd    DateTime?      @map("preferred_date_end") @db.Date
+  preferredTimeOfDay  String?        @map("preferred_time_of_day") // 'any', 'morning', 'afternoon'
+  status              WaitlistStatus @default(waiting)
+  priority            Int            @default(0) // Higher = more urgent
+  attempts            Int            @default(0)
+  maxAttempts         Int            @default(3) @map("max_attempts")
+  lastContactedAt     DateTime?      @map("last_contacted_at")
+  notes               String?
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  patient         Patient          @relation(fields: [patientId], references: [id])
+  provider        Provider?        @relation(fields: [providerId], references: [id])
+  appointmentType AppointmentType? @relation(fields: [appointmentTypeId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("waitlist_entries")
+}
+
+// ============================================
+// JOB QUEUE
+// ============================================
+
+enum JobStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+
+  @@map("job_status")
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  type        String // 'sync_mrs', 'send_reminder', 'waitlist_outbound_call', 'send_confirmation_sms'
+  payload     Json      @default("{}")
+  status      JobStatus @default(pending)
+  priority    Int       @default(0) // Higher = process first
+  runAt       DateTime  @default(now()) @map("run_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3) @map("max_attempts")
+  lastError   String?   @map("last_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, runAt, priority(sort: Desc)]) // For pending job lookup
+  @@map("jobs")
+}
+
+// ============================================
+// CONVERSATIONS & AUDIT
+// ============================================
+
+model Conversation {
+  id               String    @id @default(uuid())
+  externalId       String?   @map("external_id") // VAPI call ID or chat session ID
+  patientId        String?   @map("patient_id") // NULL until identified
+  channel          String // 'voice', 'chat'
+  callerPhone      String?   @map("caller_phone")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  endedAt          DateTime? @map("ended_at")
+  outcome          String? // 'booked', 'cancelled', 'rescheduled', 'info_only', 'escalated', 'abandoned'
+  escalationReason String?   @map("escalation_reason")
+  transcript       Json?
+  metadata         Json?
+
+  patient     Patient?     @relation(fields: [patientId], references: [id])
+  escalations Escalation[]
+
+  @@index([patientId])
+  @@map("conversations")
+}
+
+model Escalation {
+  id              String    @id @default(uuid())
+  conversationId  String?   @map("conversation_id")
+  patientId       String?   @map("patient_id")
+  reason          String // 'verification_failed', 'patient_request', 'error', 'complex_situation'
+  transferredTo   String?   @map("transferred_to") // Phone number
+  transferStatus  String?   @map("transfer_status") // 'connected', 'voicemail', 'no_answer', 'failed'
+  contextSummary  String?   @map("context_summary")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  resolutionNotes String?   @map("resolution_notes")
+
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  patient      Patient?      @relation(fields: [patientId], references: [id])
+
+  @@map("escalations")
+}
+
+// ============================================
+// SYNC STATE
+// ============================================
+
+model SyncState {
+  entityType     String    @id @map("entity_type") // 'patients', 'providers', 'appointments', 'timeslots'
+  lastSyncAt     DateTime? @map("last_sync_at")
+  lastSyncCursor String?   @map("last_sync_cursor") // For pagination/incremental sync
+  syncStatus     String    @default("idle") @map("sync_status") // 'idle', 'running', 'failed'
+  lastError      String?   @map("last_error")
+
+  @@map("sync_state")
+}
