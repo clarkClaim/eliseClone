@@ -1,12 +1,181 @@
 # Elise Clone
 
-AI-powered healthcare scheduling assistant!
+> **Call 667-677-9143 to make an appointment!**
+
+AI-powered healthcare scheduling assistant via voice (VAPI) and chat.
 
 A demo implementation inspired by [EliseAI Health](https://eliseai.com/health), focused on patient appointment scheduling through natural conversation.
 
-## Quickstart
+## Quick Start
 
-Call 667-677-9143 to make an appointment!
+### Prerequisites
+
+- Node.js 20+
+- Docker & Docker Compose
+- pnpm (`npm install -g pnpm`)
+- VAPI account with API key
+- ngrok account (free tier works)
+
+### 1. Initial Setup
+
+```bash
+# Clone and install
+git clone <repo-url>
+cd elise-clone
+pnpm install
+
+# Copy environment template
+cp .env.example .env
+```
+
+Edit `.env` with your settings:
+
+```bash
+# .env
+PROFILE=mrs                                    # Use 'mrs' for OpenMRS
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/elise_mrs
+VAPI_API_KEY=your-vapi-api-key-here            # From VAPI dashboard
+NGROK_DOMAIN=your-domain.ngrok-free.app        # Your ngrok domain (see step 5)
+```
+
+The profile config (`config/profiles/mrs.env`) has OpenMRS demo credentials pre-configured:
+
+```bash
+# config/profiles/mrs.env (no changes needed)
+PORT=3000
+OPENMRS_URL=https://o3.openmrs.org/openmrs
+OPENMRS_USER=admin
+OPENMRS_PASSWORD=Admin123
+```
+
+### 2. Start the Database
+
+```bash
+docker compose up -d
+```
+
+### 3. Initialize Database & Sync from OpenMRS
+
+```bash
+# Reset database and run migrations
+pnpm exec prisma migrate reset --force
+
+# Seed test patients (for voice testing)
+pnpm run seed
+
+# Start the server (performs initial sync from OpenMRS)
+pnpm run dev
+```
+
+Wait for the server to show `Status: READY`. This syncs providers, locations, services, and appointments from OpenMRS.
+
+### 4. Set Up Provider Schedules
+
+After the server starts, create schedule templates so providers have availability:
+
+```bash
+# In a new terminal
+pnpm run setup:availability --create
+```
+
+This creates Mon-Fri 9am-5pm schedules for synced providers.
+
+### 5. Expose Local Server via ngrok
+
+VAPI needs to reach your local server. Start ngrok in a new terminal:
+
+```bash
+# If you have a reserved domain (set NGROK_DOMAIN in .env)
+ngrok http 3000 --domain=your-domain.ngrok-free.app
+
+# Or use free random URL
+ngrok http 3000
+```
+
+If using a random URL, update `NGROK_DOMAIN` in `.env` with the generated domain.
+
+### 6. Configure VAPI
+
+```bash
+# Deploy assistant config to VAPI (uses NGROK_DOMAIN from .env)
+pnpm run vapi:setup
+```
+
+This sets the webhook URL to `https://{NGROK_DOMAIN}/vapi/tools`.
+
+### 7. Test It
+
+Call your VAPI phone number and try:
+- "I'd like to schedule an appointment"
+- Give your DOB (use a seeded patient: November 9, 1997)
+- Ask for availability and book a time
+
+---
+
+## Full Reset (Start Fresh)
+
+If you need to completely reset and start over:
+
+```bash
+# Stop the server (Ctrl+C)
+
+# Reset database
+pnpm exec prisma migrate reset --force
+
+# Re-seed test patients
+pnpm run seed
+
+# Start server (syncs from OpenMRS)
+pnpm run dev
+
+# After server is READY, create schedules
+pnpm run setup:availability --create
+```
+
+---
+
+## Useful Commands
+
+| Command | Description |
+|---------|-------------|
+| `pnpm run dev` | Start dev server with hot reload |
+| `pnpm run build` | Compile TypeScript |
+| `pnpm exec prisma studio` | Browse database in browser |
+| `pnpm exec prisma migrate reset --force` | Reset database |
+| `pnpm run seed` | Seed test patients |
+| `pnpm run setup:availability` | List providers and their schedules |
+| `pnpm run setup:availability --create` | Create default schedules |
+| `pnpm run vapi:setup` | Deploy assistant config to VAPI |
+| `pnpm run vapi:logs` | List recent VAPI calls |
+| `pnpm run vapi:logs --last` | Show transcript of last call |
+
+---
+
+## Test Patients
+
+After running `pnpm run seed`, these patients are available for testing:
+
+| Name | DOB | Phone |
+|------|-----|-------|
+| Joshua Clark | Nov 9, 1997 | +1234567890 |
+| Sarah Johnson | Mar 15, 1985 | +1234567891 |
+| Michael Chen | Jul 22, 1990 | +1234567892 |
+
+Use their DOB to identify when calling.
+
+---
+
+## Health Checks
+
+```bash
+# Basic health
+curl http://localhost:3000/health
+
+# Readiness (returns 503 if initial sync not complete)
+curl http://localhost:3000/health?ready=true
+```
+
+---
 
 ## Overview
 
@@ -37,7 +206,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 │   ==========                           │  [3] Context Store (PostgreSQL)  │ │
 │                                        │      - Patient profiles          │ │
 │   ┌──────────────────────────────────┐ │      - Availability cache        │ │
-│   │  [4] EHS Adapter Layer           │ │      - Appointment state         │ │
+│   │  [4] MRS Adapter Layer           │ │      - Appointment state         │ │
 │   │      (Abstract interface)        │ │      - Waitlist entries          │ │
 │   ├──────────────────────────────────┤ │      - Job queue                 │ │
 │   │  [5] OpenMRS Integration         │ └──────────────────────────────────┘ │
@@ -47,27 +216,15 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 │                  ▼                                                          │
 │   ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
 │   │  OpenMRS Demo Instance           │  │  [6] Sync Service              │  │
-│   │  - Patient records               │◀─│      - Polls MRS every 5-10min │  │
-│   │  - Provider calendars            │  │      - Updates context store   │  │
-│   │  - Appointments                  │  │      - Handles conflicts       │  │
+│   │  - Patient records               │◀─│      - Initial sync on startup │  │
+│   │  - Provider calendars            │  │      - Background sync every   │  │
+│   │  - Appointments                  │  │        5-60 min by entity      │  │
 │   └──────────────────────────────────┘  └────────────────────────────────┘  │
-│                                                                             │
-│   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │  [7] Waitlist Scheduler  (TODO)                                      │  │
-│   │      - Monitors for cancellations                                    │  │
-│   │      - Triggers outbound calls to waitlisted patients                │  │
-│   │      - Configurable rules (time buffer, priority, etc.)              │  │
-│   └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                             │
-│   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │   Admin UI (TODO)                                                    │  │
-│   │      - View agent conversations                                      │  │
-│   │      - Manage appointments                                           │  │
-│   │      - Monitor system health                                         │  │
-│   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## System Components
 
@@ -76,13 +233,10 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 **Purpose:** Unified conversation engine powering both voice and chat interfaces.
 
 **Responsibilities:**
-
 - Manage conversation state and context
 - Orchestrate tool calls (scheduling, lookups, etc.)
 - Handle multi-turn dialogues naturally
 - Maintain patient identification across sessions
-
-**Dependencies:** Context Store, Scheduling Tools
 
 **Key Design:** Single agent implementation with channel adapters (VAPI webhook adapter, chat HTTP adapter). This ensures consistent behavior regardless of how patients interact.
 
@@ -92,48 +246,28 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 
 **Purpose:** Tool definitions that the agent uses to perform scheduling actions.
 
-**Responsibilities:**
-
-- `check_availability` - Query open slots for a provider/date range
-- `book_appointment` - Reserve a slot for a patient
-- `cancel_appointment` - Cancel and optionally add to waitlist
-- `reschedule_appointment` - Cancel + book in one operation
-- `add_to_waitlist` - Queue patient for earlier openings
-- `get_appointment_details` - Look up existing appointments
-
-**Dependencies:** Context Store
+**Tools:**
+- `identify_patient` - Lookup patient by phone + DOB, returns upcoming appointments
+- `get_availability` - Query open times for a provider/date range
+- `book_appointment` - Reserve a time for a patient
+- `cancel_appointment` - Cancel with optional rebooking suggestions
 
 **Key Design:** Tools operate on the Context Store, not directly on the MRS. This enables real-time responsiveness without hammering the MRS API.
 
 ---
 
-### [3] Context Store
+### [3] Context Store (PostgreSQL)
 
 **Purpose:** PostgreSQL database serving as the real-time operational store.
 
 **Responsibilities:**
-
 - Cache patient profiles synced from MRS
-- Store computed availability (provider × timeslot matrix)
+- Store provider schedule templates (define availability)
 - Track appointment lifecycle (booked → confirmed → completed/cancelled)
 - Manage waitlist queue with priority rules
-- Run job queue for async operations (reminders, outbound calls)
+- Run job queue for async operations (push sync, reminders)
 
-**Dependencies:** PostgreSQL
-
-**Key Design:** "Postgres for everything" — context, cache, and job queue in one database. Uses `pg_notify` + polling for job processing, avoiding additional infrastructure.
-
-**Tables (conceptual):**
-
-```
-patients          - Synced patient profiles
-providers         - Synced provider info
-availability      - Computed open slots
-appointments      - Current appointment state
-waitlist          - Patients waiting for earlier slots
-jobs              - Async job queue (reminders, outbound)
-sync_state        - Last sync timestamps per entity type
-```
+**Key Design:** "Postgres for everything" — context, cache, and job queue in one database. Uses polling for job processing, avoiding additional infrastructure.
 
 ---
 
@@ -142,218 +276,108 @@ sync_state        - Last sync timestamps per entity type
 **Purpose:** Abstract interface for medical record system integration with capability discovery.
 
 **Responsibilities:**
-
-- Define standard operations (fetch patients, fetch providers, fetch/create appointments)
+- Define standard operations (fetch patients, providers, appointments)
 - Handle authentication per MRS type
 - Transform MRS-specific data into canonical format
-- Manage rate limiting and error handling
 - Report system capabilities for adaptive behavior
 
-**Dependencies:** None (interface only)
-
-**Key Design:** Designed for multi-tenant deployment where different customers use different MRS systems. The adapter interface remains stable while implementations vary. Each adapter reports its capabilities, allowing the system to adapt behavior based on what the MRS supports.
+**Key Design:** Designed for multi-tenant deployment where different customers use different MRS systems. Each adapter reports its capabilities, allowing the system to adapt.
 
 ```typescript
 interface MRSAdapter {
   readonly capabilities: MRSCapabilities;
-
-  // Connection lifecycle
-  connect(): Promise<void>
-  disconnect(): Promise<void>
   healthCheck(): Promise<HealthCheckResult>
-
-  // Patient operations
   getPatient(mrsId: string): Promise<MRSPatient | null>
   searchPatients(query: PatientSearchQuery): Promise<MRSPatient[]>
-
-  // Provider & Location operations
   getProviders(): Promise<MRSProvider[]>
   getLocations(): Promise<MRSLocation[]>
-
-  // Availability & Appointments
-  getAvailability(dateRange: DateRange): Promise<MRSSlot[]>
-  verifySlotAvailable(slotMrsId: string): Promise<SlotVerificationResult>
+  checkConflicts(request: ConflictCheckRequest): Promise<ConflictCheckResult>
   getAppointments(filter: AppointmentFilter): Promise<MRSAppointment[]>
   createAppointment(request: CreateAppointmentRequest): Promise<MRSAppointment>
   cancelAppointment(mrsId: string, reason?: string): Promise<void>
 }
 ```
 
-**Supported MRS Systems:** OpenMRS (implemented), Epic, Cerner, athenahealth, OpenEMR (interface defined)
-
 ---
 
 ### [5] OpenMRS Integration
 
-**Purpose:** Concrete MRS adapter implementation for OpenMRS.
+**Purpose:** Concrete MRS adapter implementation for OpenMRS/Bahmni.
 
-**Responsibilities:**
-
-- Implement MRSAdapter interface for OpenMRS REST API
-- Handle OpenMRS authentication (basic auth or OAuth)
-- Map OpenMRS data structures to canonical format
-- Manage OpenMRS-specific quirks and limitations
-
-**Dependencies:** MRS Adapter Layer, OpenMRS Demo instance
+Uses the public OpenMRS 3 demo instance at `o3.openmrs.org`. Data may reset periodically — acceptable for demo purposes.
 
 **Configuration:**
-
 ```
 OPENMRS_URL=https://o3.openmrs.org/openmrs
 OPENMRS_USER=admin
 OPENMRS_PASSWORD=Admin123
 ```
 
-**Note:** Using the public OpenMRS 3 demo instance at `o3.openmrs.org`. Data may reset periodically — this is acceptable for demo purposes.
-
 ---
 
 ### [6] Sync Service
 
-**Purpose:** Keep Context Store synchronized with MRS data with intelligent rate limiting.
+**Purpose:** Keep Context Store synchronized with MRS data.
 
-**Responsibilities:**
-
-- Poll MRS for changes on configurable intervals per entity type
-- Detect and sync new/updated patients, providers, appointments
-- Recompute availability after appointment changes
-- Handle sync conflicts with configurable resolution rules
-- Track sync state with rate limit awareness
-- Push local appointments to MRS with retry logic and exponential backoff
-- Detect MRS demo resets and trigger full re-sync
-
-**Dependencies:** MRS Adapter Layer, Context Store
-
-**Key Design:** Polling-based with adaptive intervals. During live booking calls, the system uses MRS-first booking (verify slot → create in MRS → record locally). Background sync keeps data fresh and handles the push queue for appointments created during MRS outages.
+**Sync Modes:**
+- **Startup sync**: Blocking sync of all entities before accepting requests
+- **Background sync**: Periodic updates (5-60 min intervals by entity type)
+- **Push sync**: Local changes pushed to MRS with retry and exponential backoff
 
 **Sync Flow:**
-
 ```
-1. Check rate limit state (back off if needed)
-2. Fetch records from MRS
-3. Detect changes via comparison (MRS may not support modified-since)
-4. Apply conflict resolution rules
-5. Upsert into Context Store
-6. Process push queue (local → MRS)
-7. Update sync state and schedule next run
+1. Fetch records from MRS
+2. Detect changes via comparison
+3. Apply conflict resolution rules (MRS usually wins)
+4. Upsert into Context Store
+5. Process push queue (local → MRS)
+6. Update sync state
 ```
 
 **Default Sync Intervals:**
 
-
-| Entity       | Interval | Priority | Rationale                      |
-| ------------ | -------- | -------- | ------------------------------ |
-| Availability | 5 min    | High     | Freshness critical for booking |
-| Appointments | 5 min    | High     | Detect external changes        |
-| Patients     | 30 min   | Medium   | Less volatile data             |
-| Providers    | 60 min   | Low      | Rarely changes                 |
-| Locations    | 60 min   | Low      | Rarely changes                 |
-
-
-**Conflict Resolution:**
-
-- Patient/Provider data: MRS wins (source of truth)
-- Appointments in MRS but not local: Import
-- Appointments local but not in MRS: Flag for review (SyncConflict table)
-- External booking conflicts: Offer alternatives, flag for review
-- Slots deleted in MRS: Mark `mrsExists=false`, prevent new bookings
-
-**Rate Limiting:**
-
-- Tracks `rateLimitRemaining` and `rateLimitResetAt` per sync state
-- Exponential backoff on consecutive failures
-- Adaptive interval adjustment when quota is low (<20%)
-
-**Configuration:** See Environment Variables section below
-
-**Implementation:** See `src/sync/` directory
+| Entity | Interval | Rationale |
+|--------|----------|-----------|
+| Appointments | 5 min | Detect external changes quickly |
+| Patients | 30 min | Less volatile data |
+| Providers | 60 min | Rarely changes |
+| Locations | 60 min | Rarely changes |
+| Appointment Types | 60 min | Rarely changes |
 
 ---
 
-### [7] Waitlist Scheduler
+### [7] Waitlist Scheduler (TODO)
 
 **Purpose:** Proactively fill cancelled appointments from waitlist.
 
 **Responsibilities:**
-
 - Monitor for appointment cancellations
 - Match cancelled slots against waitlist entries
 - Trigger outbound calls via VAPI to offer slots
 - Handle acceptance/rejection/no-answer flows
-- Respect configurable rules (minimum notice, priority order, max attempts)
-
-**Dependencies:** Context Store, Agent Core (for outbound calls)
-
-**Trigger Conditions:**
-
-- Direct trigger when appointment cancelled (if within rules)
-- Periodic scan for unfilled slots approaching deadline
-- Manual trigger from admin (future)
-
-**Rules Engine:**
-
-```
-- min_notice_hours: 24      # Don't offer slots less than 24h away
-- max_attempts: 3           # Try up to 3 waitlist patients per slot
-- priority_order: fifo      # First-in-first-out, or could be clinical priority
-- call_timeout_minutes: 5   # Wait this long for patient to answer/decide
-```
-
----
-
-### [BACKLOG] Admin UI
-
-**Purpose:** Internal dashboard for operations staff.
-
-**Planned Features:**
-
-- View real-time agent conversations
-- Browse/search appointments
-- Manage waitlist manually
-- Monitor sync status and system health
-- Override scheduling rules when needed
-
-**Status:** Not in MVP scope. Will be built after core scheduling flow is stable.
 
 ---
 
 ## Technology Stack
 
-
-| Component      | Technology         | Rationale                                     |
-| -------------- | ------------------ | --------------------------------------------- |
-| **Language**   | TypeScript/Node.js | Consistency across stack, VAPI SDK support    |
-| **Database**   | PostgreSQL         | One DB for everything: data, cache, job queue |
-| **Job Queue**  | PostgreSQL         | `pg_notify` + polling table, no extra infra   |
-| **Voice AI**   | VAPI               | Purpose-built for voice agents, good docs     |
-| **MRS**        | OpenMRS (demo)     | Open source, REST API, public demo available  |
-| **Deployment** | Fly.io             | Simple deploy, good free tier, scales well    |
-| **Container**  | Docker             | Local dev + deployment parity                 |
-
+| Component | Technology | Rationale |
+|-----------|------------|-----------|
+| Language | TypeScript/Node.js | VAPI SDK support, type safety |
+| Database | PostgreSQL | Data, cache, and job queue in one |
+| Voice AI | VAPI | Purpose-built for voice agents |
+| MRS | OpenMRS | Open source, REST API, public demo |
+| Deployment | Fly.io | Simple deploy, good free tier |
 
 ### "Postgres for Everything" Philosophy
 
-Rather than introducing Redis for caching and Bull for job queues, we use PostgreSQL for all persistence needs:
+Inspired by [Postgres for Everything](https://www.amazingcto.com/postgres-for-everything/) — rather than introducing Redis for caching and Bull for job queues, we use PostgreSQL for all persistence needs:
 
 1. **Simpler operations** — One database to backup, monitor, and maintain
 2. **Transactional consistency** — Jobs and data in same transaction
 3. **Good enough performance** — For demo scale, Postgres handles it all
-4. **Fewer moving parts** — Reduces deployment complexity
 
 The job queue uses a simple pattern:
-
 ```sql
--- Jobs table with status
-CREATE TABLE jobs (
-  id SERIAL PRIMARY KEY,
-  type TEXT NOT NULL,
-  payload JSONB NOT NULL,
-  status TEXT DEFAULT 'pending',
-  run_at TIMESTAMP DEFAULT NOW(),
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Workers poll for pending jobs
 SELECT * FROM jobs
 WHERE status = 'pending' AND run_at <= NOW()
 ORDER BY run_at
@@ -363,161 +387,36 @@ LIMIT 1;
 
 ---
 
-## Quick Start
-
-### Prerequisites
-
-- Node.js 20+
-- Docker & Docker Compose
-- VAPI account and API key
-- (Optional) Fly.io CLI for deployment
-
-### Setup
-
-```bash
-# Clone the repository
-git clone <repo-url>
-cd elise-clone
-
-# Copy environment template
-cp .env.example .env
-
-# Edit .env:
-# - Set PROFILE=mrs (or emr for OpenEMR)
-# - Add VAPI_API_KEY and VAPI_ASSISTANT_ID
-
-# Start PostgreSQL (profile-aware)
-docker compose up -d
-
-# Install dependencies
-pnpm install
-
-# Run database migrations
-pnpm run db:migrate
-
-# Seed test data
-pnpm run db:seed
-
-# Start the development server
-pnpm run dev
-```
-
-### Profile System
-
-Elise uses a profile system to support multiple MRS backends. Set `PROFILE` in your `.env`:
-
-
-| Profile | MRS     | Server Port | DB Port |
-| ------- | ------- | ----------- | ------- |
-| `mrs`   | OpenMRS | 3000        | 5432    |
-| `emr`   | OpenEMR | 3001        | 5433    |
-
-
-Profile-specific configs are in `config/profiles/`. For running multiple offices simultaneously, see [Multi-Office Setup](docs/MULTI_OFFICE_SETUP.md).
-
-### Verify It's Working
-
-```bash
-# Check health endpoint
-curl http://localhost:3000/health
-
-# Expected response:
-# { "status": "ok", "database": "connected", "lastSync": "..." }
-
-# Test chat endpoint
-curl -X POST http://localhost:3000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "I need to schedule an appointment"}'
-```
-
-For voice testing, configure your VAPI assistant's webhook URL to point to your server (use ngrok for local development).
-
----
-
-## Deployment
-
-### Fly.io
-
-```bash
-# Install Fly CLI
-curl -L https://fly.io/install.sh | sh
-
-# Login
-fly auth login
-
-# Launch (first time)
-fly launch
-
-# Deploy (subsequent)
-fly deploy
-
-# Set secrets
-fly secrets set VAPI_API_KEY=your-key-here
-fly secrets set DATABASE_URL=your-postgres-url
-```
-
-Fly.io will provision a PostgreSQL database for you, or you can attach an external one.
-
-### Docker Compose (Self-hosted)
-
-```bash
-# Production build
-docker compose -f docker-compose.prod.yml up -d
-```
-
----
-
 ## Environment Variables
 
 ### Core Settings
 
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PROFILE` | Yes | MRS profile: `mrs` (OpenMRS) or `emr` (OpenEMR) |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `VAPI_API_KEY` | Yes | VAPI API key for voice |
+| `NGROK_DOMAIN` | No | Your ngrok domain for VAPI webhooks |
 
-| Variable            | Required | Description                                     |
-| ------------------- | -------- | ----------------------------------------------- |
-| `PROFILE`           | Yes      | MRS profile: `mrs` (OpenMRS) or `emr` (OpenEMR) |
-| `DATABASE_URL`      | Yes      | PostgreSQL connection string                    |
-| `VAPI_API_KEY`      | Yes      | VAPI API key for voice                          |
-| `VAPI_ASSISTANT_ID` | Yes      | VAPI assistant ID (configure in dashboard)      |
-| `PORT`              | No       | Server port (loaded from profile config)        |
+### MRS Integration (in `config/profiles/mrs.env`)
 
-
-Profile-specific settings (PORT, DB_PORT, MRS URLs, NGROK_DOMAIN) are loaded from `config/profiles/${PROFILE}.env`.
-
-### MRS Integration
-
-
-| Variable             | Required | Description                                                   |
-| -------------------- | -------- | ------------------------------------------------------------- |
-| `OPENMRS_URL`        | Yes      | OpenMRS instance URL (e.g., `https://o3.openmrs.org/openmrs`) |
-| `OPENMRS_USER`       | Yes      | OpenMRS username                                              |
-| `OPENMRS_PASSWORD`   | Yes      | OpenMRS password                                              |
-| `OPENMRS_TIMEOUT_MS` | No       | Request timeout (default: 30000)                              |
-
+| Variable | Description |
+|----------|-------------|
+| `OPENMRS_URL` | OpenMRS instance URL |
+| `OPENMRS_USER` | OpenMRS username |
+| `OPENMRS_PASSWORD` | OpenMRS password |
+| `OPENMRS_TIMEOUT_MS` | Request timeout (default: 30000) |
 
 ### Sync Configuration
 
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYNC_APPOINTMENTS_INTERVAL_MS` | 300000 (5 min) | Appointments sync interval |
+| `SYNC_PATIENTS_INTERVAL_MS` | 1800000 (30 min) | Patients sync interval |
+| `SYNC_PROVIDERS_INTERVAL_MS` | 3600000 (60 min) | Providers sync interval |
+| `SYNC_FULL_SYNC_TIME` | `02:00` | Daily full sync time (24h format) |
 
-| Variable                        | Required | Description                                           |
-| ------------------------------- | -------- | ----------------------------------------------------- |
-| `SYNC_AVAILABILITY_INTERVAL_MS` | No       | Availability sync interval (default: 300000 = 5 min)  |
-| `SYNC_APPOINTMENTS_INTERVAL_MS` | No       | Appointments sync interval (default: 300000 = 5 min)  |
-| `SYNC_PATIENTS_INTERVAL_MS`     | No       | Patients sync interval (default: 1800000 = 30 min)    |
-| `SYNC_PROVIDERS_INTERVAL_MS`    | No       | Providers sync interval (default: 3600000 = 60 min)   |
-| `SYNC_LOCATIONS_INTERVAL_MS`    | No       | Locations sync interval (default: 3600000 = 60 min)   |
-| `SYNC_FULL_SYNC_TIME`           | No       | Daily full sync time in 24h format (default: `02:00`) |
-| `SYNC_MAX_CONSECUTIVE_FAILURES` | No       | Alert threshold for consecutive failures (default: 5) |
-
-
-### Booking Configuration
-
-
-| Variable                     | Required | Description                                                      |
-| ---------------------------- | -------- | ---------------------------------------------------------------- |
-| `BOOKING_STALE_THRESHOLD_MS` | No       | When to warn about stale availability (default: 600000 = 10 min) |
-| `BOOKING_MAX_ALTERNATIVES`   | No       | Max alternative slots to suggest on conflict (default: 3)        |
-
-
-See `.env.example` for a complete template.
+See `.env.example` for complete template.
 
 ---
 
@@ -532,15 +431,37 @@ See `.env.example` for a complete template.
   - Check availability by provider/date
   - Book new appointments
   - Cancel/reschedule existing appointments
-  - Waitlist management with outbound calls
+  - Waitlist management (planned)
 
 ### Backlogged
 
 - **Admin UI** — Internal dashboard for operations
-- **Billing & Payments** — Charge alerts, payment reminders
+- **Multi-MRS Support** — Adapter interface ready, only OpenMRS implemented
 - **Email/SMS Channels** — Currently voice + chat only
-- **Multi-MRS Support** — Adapter interface ready, but only OpenMRS implemented
-- **Advanced Waitlist Rules** — Clinical priority, complex matching
+
+---
+
+## Profile System
+
+Elise uses profiles to support multiple MRS backends:
+
+| Profile | MRS | Server Port | DB Port |
+|---------|-----|-------------|---------|
+| `mrs` | OpenMRS | 3000 | 5432 |
+| `emr` | OpenEMR | 3001 | 5433 |
+
+Set `PROFILE` in `.env`. Profile configs are in `config/profiles/`.
+
+---
+
+## Deployment (Fly.io)
+
+```bash
+fly launch
+fly secrets set VAPI_API_KEY=your-key
+fly secrets set DATABASE_URL=your-postgres-url
+fly deploy
+```
 
 ---
 
@@ -549,53 +470,43 @@ See `.env.example` for a complete template.
 ```
 elise-clone/
 ├── src/
-│   ├── agent/           # [1] Agent Core
-│   │   ├── core.ts      # Unified agent logic
-│   │   ├── adapters/    # Channel adapters (vapi, chat)
-│   │   └── tools/       # [2] Scheduling tools
-│   ├── booking/         # MRS-first booking flow
-│   │   └── mrs-booking.ts  # Availability check, book, cancel with MRS
-│   ├── db/              # [3] Context Store
-│   │   ├── schema.ts    # Database schema
-│   │   ├── queries.ts   # Query functions
-│   │   └── jobs.ts      # Job queue implementation
-│   ├── mrs/             # [4] MRS Adapter Layer
-│   │   ├── adapter.ts   # Abstract interface with capabilities
-│   │   ├── types.ts     # MRS entity types and capabilities
-│   │   ├── errors.ts    # Typed MRS errors
-│   │   ├── adapters/    # Concrete implementations
-│   │   │   ├── openmrs/ # [5] OpenMRS adapter
-│   │   │   └── mock/    # Mock adapter for testing
-│   │   └── systems/     # MRS system documentation
-│   ├── sync/            # [6] Sync Service
-│   │   ├── types.ts     # Sync types and config
-│   │   ├── scheduler.ts # Interval-based scheduling
-│   │   ├── change-detection.ts  # Compare MRS vs local
-│   │   ├── conflict-resolution.ts  # Resolution rules
-│   │   ├── rate-limiter.ts  # Rate limit tracking
-│   │   ├── entities/    # Per-entity sync logic
-│   │   ├── push/        # Push local → MRS
-│   │   ├── jobs/        # Sync job handlers
-│   │   ├── metrics.ts   # Observability
-│   │   ├── health.ts    # Health checks
-│   │   └── demo-reset.ts  # Demo reset detection
-│   ├── waitlist/        # [7] Waitlist Scheduler
-│   │   └── scheduler.ts # Outbound call logic
-│   └── server.ts        # HTTP server (Express/Fastify)
-├── test/                # Test files
-│   ├── change-detection.test.ts
-│   ├── conflict-resolution.test.ts
-│   ├── mock-adapter.test.ts
-│   ├── openmrs-integration.test.ts
-│   └── booking-flow.test.ts
-├── openspec/            # Specifications and changes
-├── docker-compose.yml   # Local development
-├── fly.toml             # Fly.io config
-└── package.json
+│   ├── agent/              # [1] Agent Core
+│   │   ├── adapters/       # Channel adapters (vapi, chat)
+│   │   └── tools/          # [2] Scheduling tools
+│   │       ├── identify-patient.ts
+│   │       ├── get-availability.ts
+│   │       ├── book-appointment.ts
+│   │       └── cancel-appointment.ts
+│   ├── scheduling/         # Availability computation, booking service
+│   │   ├── availability-service.ts   # Schedule template → time windows
+│   │   └── booking-service.ts        # Datetime-based booking
+│   ├── db/                 # [3] Context Store
+│   │   └── client.ts       # Prisma client
+│   ├── mrs/                # [4] MRS Adapter Layer
+│   │   ├── adapter.ts      # Abstract interface
+│   │   ├── types.ts        # MRS entity types
+│   │   ├── errors.ts       # Typed MRS errors
+│   │   └── adapters/
+│   │       ├── openmrs/    # [5] OpenMRS adapter
+│   │       └── mock/       # Mock adapter for testing
+│   ├── sync/               # [6] Sync Service
+│   │   ├── startup.ts      # Blocking initial sync
+│   │   ├── scheduler.ts    # Background sync scheduling
+│   │   ├── entities/       # Per-entity sync (patients, providers, etc.)
+│   │   ├── push/           # Push local changes to MRS
+│   │   └── conflict-resolution.ts
+│   └── server.ts           # Express HTTP server
+├── config/
+│   ├── profiles/           # Profile-specific env (mrs.env, emr.env)
+│   └── assistants/         # VAPI assistant configs
+├── scripts/                # Setup and utility scripts
+├── prisma/                 # Database schema and migrations
+├── test/                   # Test files
+└── docs/                   # Documentation
 ```
 
 ---
 
 ## License
 
-MIT (or your preferred license)
+MIT
