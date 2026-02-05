@@ -1,5 +1,5 @@
 // OpenMRS Adapter Implementation
-// Implements MRSAdapter interface for OpenMRS REST API with appointment scheduling module
+// Implements MRSAdapter interface for OpenMRS REST API with Bahmni appointments module
 
 import type { MRSAdapter } from '../../adapter.js';
 import type {
@@ -11,16 +11,20 @@ import type {
   MRSAppointmentType,
   MRSAppointment,
   MRSSlot,
+  MRSScheduleConfig,
   PatientQuery,
   AppointmentFilter,
   DateRange,
-  NewAppointment,
+  CreateAppointmentRequest,
+  NewPatient,
+  ConflictCheckRequest,
+  ConflictCheckResult,
   SlotVerificationResult,
   HealthCheckResult,
 } from '../../types.js';
-import { NotFoundError, MRSValidationError, SlotConflictError, SlotNotFoundError } from '../../errors.js';
+import { NotFoundError, MRSValidationError } from '../../errors.js';
 import { OpenMRSClient, type OpenMRSClientConfig } from './client.js';
-import { OPENMRS_CAPABILITIES, OPENMRS_CAPABILITIES_NO_APPOINTMENTS, REVERSE_STATUS_MAP } from './capabilities.js';
+import { OPENMRS_CAPABILITIES, OPENMRS_CAPABILITIES_NO_APPOINTMENTS, BAHMNI_REVERSE_STATUS_MAP } from './capabilities.js';
 import {
   mapPatient,
   mapPatientList,
@@ -29,12 +33,12 @@ import {
   mapProviderList,
   mapLocation,
   mapLocationList,
-  mapAppointmentType,
-  mapAppointmentTypeList,
-  mapAppointment,
-  mapAppointmentList,
-  mapSlot,
-  mapSlotList,
+  mapBahmniAppointmentServiceList,
+  mapBahmniAppointmentList,
+  mapBahmniServicesToScheduleConfigs,
+  mapNewPatientToOpenMRS,
+  type BahmniAppointmentServiceResponse,
+  type BahmniAppointmentResponse,
 } from './mappers.js';
 
 export interface OpenMRSAdapterConfig {
@@ -109,20 +113,21 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   /**
-   * Detect if the appointment scheduling module is installed.
+   * Detect if the Bahmni appointments module is installed.
    * If not, adjust capabilities accordingly.
    */
   private async detectAppointmentModule(): Promise<void> {
     try {
-      // Try to access the appointment types endpoint as a probe
-      const response = await this.client.get<unknown>(
-        '/appointmentscheduling/appointmenttype?limit=1'
-      );
-      // If we get here without error, module is available
+      // Probe for Bahmni appointments module by checking services endpoint
+      const response = await this.client.getAppointmentServices<unknown[]>();
+      // If we get here without error and got a response, module is available
       this.appointmentModuleAvailable = response !== null;
+      if (this.appointmentModuleAvailable) {
+        console.log('[OpenMRSAdapter] Bahmni appointments module detected');
+      }
     } catch {
       // Module not available - use limited capabilities
-      console.log('[OpenMRSAdapter] Appointment scheduling module not available - running in limited mode');
+      console.log('[OpenMRSAdapter] Bahmni appointments module not available - running in limited mode');
       this.appointmentModuleAvailable = false;
       this.capabilities = OPENMRS_CAPABILITIES_NO_APPOINTMENTS;
     }
@@ -204,6 +209,59 @@ export class OpenMRSAdapter implements MRSAdapter {
     return mapFhirPatientBundle(response as Parameters<typeof mapFhirPatientBundle>[0]);
   }
 
+  async createPatient(patient: NewPatient): Promise<MRSPatient> {
+    // Get UUIDs from environment, with O3 demo defaults
+    // See config/openmrs-o3-demo.json for reference
+    const identifierTypeUuid = process.env.OPENMRS_IDENTIFIER_TYPE_UUID
+      ?? '05a29f94-c0ed-11e2-94be-8c13b969e334'; // OpenMRS ID
+    const identifierLocationUuid = process.env.OPENMRS_IDENTIFIER_LOCATION_UUID
+      ?? '44c3efb0-2583-4c80-a79e-1f756a03c0a1'; // Outpatient Clinic
+    const phoneAttributeTypeUuid = process.env.OPENMRS_PHONE_ATTR_UUID
+      ?? '14d4f066-15f5-102d-96e4-000c29c2a5d7'; // Telephone Number
+
+    // Build OpenMRS patient payload
+    const payload = mapNewPatientToOpenMRS(patient, {
+      phoneAttributeTypeUuid,
+      identifierTypeUuid,
+      identifierLocationUuid,
+    });
+
+    // Create patient in OpenMRS
+    const response = await this.client.createPatient<{
+      uuid: string;
+      display: string;
+      person: {
+        uuid: string;
+        preferredName?: { givenName?: string; familyName?: string };
+        birthdate?: string;
+        gender?: string;
+        attributes?: Array<{
+          attributeType: { uuid: string; display: string };
+          value: string;
+        }>;
+      };
+    }>(payload);
+
+    if (!response?.uuid) {
+      throw new MRSValidationError('Failed to create patient - no UUID in response');
+    }
+
+    // Map response to MRSPatient
+    return {
+      mrsId: response.uuid,
+      name: response.display || `${patient.givenName} ${patient.familyName}`,
+      givenName: response.person?.preferredName?.givenName ?? patient.givenName,
+      familyName: response.person?.preferredName?.familyName ?? patient.familyName,
+      dateOfBirth: response.person?.birthdate
+        ? new Date(response.person.birthdate)
+        : patient.dateOfBirth,
+      gender: response.person?.gender,
+      phoneNumbers: patient.phone
+        ? [{ phone: patient.phone, phoneType: patient.phoneType ?? 'mobile', isPrimary: true }]
+        : [],
+    };
+  }
+
   // ============================================
   // Provider Operations
   // ============================================
@@ -237,7 +295,7 @@ export class OpenMRSAdapter implements MRSAdapter {
   }
 
   // ============================================
-  // Appointment Type Operations
+  // Appointment Type Operations (Bahmni Services)
   // ============================================
 
   async getAppointmentTypes(): Promise<MRSAppointmentType[]> {
@@ -245,86 +303,141 @@ export class OpenMRSAdapter implements MRSAdapter {
       return [];
     }
 
-    const response = await this.client.get<unknown>(
-      `/appointmentscheduling/appointmenttype?v=default&limit=${this.maxResults}`
-    );
+    const response = await this.client.getAppointmentServices<BahmniAppointmentServiceResponse[]>();
     if (!response) {
       return [];
     }
-    return mapAppointmentTypeList(response as Parameters<typeof mapAppointmentTypeList>[0]);
+    return mapBahmniAppointmentServiceList(response);
   }
 
   // ============================================
-  // Availability Operations
+  // Schedule Configuration
   // ============================================
 
-  async getAvailability(range: DateRange): Promise<MRSSlot[]> {
-    if (!this.appointmentModuleAvailable) {
-      // Appointment scheduling module not available - return empty
-      // Availability must be managed locally
-      return [];
-    }
-
-    const params = new URLSearchParams();
-    params.set('fromDate', this.formatDate(range.start));
-    params.set('toDate', this.formatDate(range.end));
-
-    const response = await this.client.get<unknown>(
-      `/appointmentscheduling/timeslot?${params.toString()}`
-    );
-
-    if (!response) {
-      return [];
-    }
-
-    return mapSlotList(response as Parameters<typeof mapSlotList>[0]);
-  }
-
-  async getProviderAvailability(providerMrsId: string, dateRange: DateRange): Promise<MRSSlot[]> {
+  /**
+   * Get schedule/service configuration from Bahmni.
+   * Returns service hours and weekly availability patterns.
+   */
+  async getScheduleConfig(): Promise<MRSScheduleConfig[]> {
     if (!this.appointmentModuleAvailable) {
       return [];
     }
 
-    const params = new URLSearchParams();
-    params.set('provider', providerMrsId);
-    params.set('fromDate', this.formatDate(dateRange.start));
-    params.set('toDate', this.formatDate(dateRange.end));
-
-    const response = await this.client.get<unknown>(
-      `/appointmentscheduling/timeslot?${params.toString()}`
-    );
-
+    const response = await this.client.getAppointmentServices<BahmniAppointmentServiceResponse[]>();
     if (!response) {
       return [];
     }
-
-    return mapSlotList(response as Parameters<typeof mapSlotList>[0]);
+    return mapBahmniServicesToScheduleConfigs(response);
   }
 
   // ============================================
-  // Real-Time Slot Validation
+  // Conflict Detection
   // ============================================
 
-  async verifySlotAvailable(slotId: string): Promise<SlotVerificationResult> {
+  /**
+   * Check for scheduling conflicts at a given time.
+   * Queries existing appointments to detect overlaps.
+   */
+  async checkConflicts(request: ConflictCheckRequest): Promise<ConflictCheckResult> {
     if (!this.appointmentModuleAvailable) {
-      // Without appointment module, always return available
-      // Local system manages availability
-      return { available: true };
+      // No appointment module - can't check conflicts in MRS
+      return { hasConflict: false };
     }
 
-    const response = await this.client.get<unknown>(
-      `/appointmentscheduling/timeslot/${slotId}`
-    );
-
-    if (!response) {
-      throw new SlotNotFoundError(slotId);
-    }
-
-    const slot = mapSlot(response as Parameters<typeof mapSlot>[0]);
-    return {
-      available: !slot.isBooked,
-      slot,
+    // Search for appointments in the requested time range
+    const searchFilter: {
+      startDate: string;
+      endDate: string;
+      providerUuid?: string;
+    } = {
+      startDate: this.formatDate(request.startDateTime),
+      endDate: this.formatDate(request.endDateTime),
     };
+
+    if (request.providerId) {
+      searchFilter.providerUuid = request.providerId;
+    }
+
+    const appointments = await this.client.searchAppointments<BahmniAppointmentResponse[]>(searchFilter);
+
+    if (!appointments || appointments.length === 0) {
+      return { hasConflict: false };
+    }
+
+    // Filter to only active appointments that overlap with requested time
+    const conflicting = mapBahmniAppointmentList(appointments).filter(apt => {
+      // Skip the appointment being rescheduled
+      if (request.excludeAppointmentId && apt.mrsId === request.excludeAppointmentId) {
+        return false;
+      }
+
+      // Skip cancelled/completed appointments
+      if (apt.status === 'cancelled' || apt.status === 'completed' || apt.status === 'no_show') {
+        return false;
+      }
+
+      // Check for time overlap
+      const requestStart = request.startDateTime.getTime();
+      const requestEnd = request.endDateTime.getTime();
+      const aptStart = apt.startTime.getTime();
+      const aptEnd = apt.endTime.getTime();
+
+      // Overlap if: request starts before apt ends AND request ends after apt starts
+      return requestStart < aptEnd && requestEnd > aptStart;
+    });
+
+    if (conflicting.length > 0) {
+      return {
+        hasConflict: true,
+        conflictingAppointments: conflicting,
+        reason: `Found ${conflicting.length} conflicting appointment(s)`,
+      };
+    }
+
+    return { hasConflict: false };
+  }
+
+  // ============================================
+  // Availability Operations (Deprecated)
+  // ============================================
+
+  /**
+   * Get availability for a date range.
+   *
+   * @deprecated Bahmni doesn't use slots. Use getScheduleConfig() + local AvailabilityService instead.
+   * This method returns empty array for Bahmni adapters.
+   */
+  async getAvailability(_range: DateRange): Promise<MRSSlot[]> {
+    console.warn('[OpenMRSAdapter] getAvailability() is deprecated. Use getScheduleConfig() + local AvailabilityService.');
+    // Bahmni doesn't have discrete timeslots - services define availability windows
+    return [];
+  }
+
+  /**
+   * Get availability for a specific provider.
+   *
+   * @deprecated Bahmni doesn't use provider-based slots. Use getScheduleConfig() + local AvailabilityService.
+   */
+  async getProviderAvailability(_providerMrsId: string, _dateRange: DateRange): Promise<MRSSlot[]> {
+    console.warn('[OpenMRSAdapter] getProviderAvailability() is deprecated. Use getScheduleConfig() + local AvailabilityService.');
+    // Bahmni doesn't have provider-specific slots
+    return [];
+  }
+
+  // ============================================
+  // Real-Time Slot Validation (Deprecated)
+  // ============================================
+
+  /**
+   * Verify slot availability.
+   *
+   * @deprecated Use checkConflicts() instead for datetime-based conflict detection.
+   * Bahmni doesn't use slots - this always returns available.
+   */
+  async verifySlotAvailable(_slotId: string): Promise<SlotVerificationResult> {
+    console.warn('[OpenMRSAdapter] verifySlotAvailable() is deprecated. Use checkConflicts() instead.');
+    // Bahmni doesn't have slots - always return available
+    return { available: true };
   }
 
   // ============================================
@@ -338,60 +451,95 @@ export class OpenMRSAdapter implements MRSAdapter {
       return [];
     }
 
-    const params = new URLSearchParams();
-    params.set('fromDate', this.formatDate(filter.startDate));
-    params.set('toDate', this.formatDate(filter.endDate));
-    params.set('v', 'full');
+    // Build Bahmni search filter
+    const searchFilter: {
+      patientUuid?: string;
+      providerUuid?: string;
+      startDate?: string;
+      endDate?: string;
+      status?: string;
+    } = {
+      startDate: this.formatDate(filter.startDate),
+      endDate: this.formatDate(filter.endDate),
+    };
 
     if (filter.providerMrsId) {
-      params.set('provider', filter.providerMrsId);
+      searchFilter.providerUuid = filter.providerMrsId;
     }
     if (filter.patientMrsId) {
-      params.set('patient', filter.patientMrsId);
+      searchFilter.patientUuid = filter.patientMrsId;
     }
+    // Note: Bahmni only supports single status filter, take first if multiple
     if (filter.status && filter.status.length > 0) {
-      params.set('status', filter.status.join(','));
+      searchFilter.status = BAHMNI_REVERSE_STATUS_MAP[filter.status[0]] ?? filter.status[0];
     }
 
-    const response = await this.client.get<unknown>(
-      `/appointmentscheduling/appointment?${params.toString()}`
-    );
+    const response = await this.client.searchAppointments<BahmniAppointmentResponse[]>(searchFilter);
 
     if (!response) {
       return [];
     }
 
-    return mapAppointmentList(response as Parameters<typeof mapAppointmentList>[0]);
+    return mapBahmniAppointmentList(response);
   }
 
-  async createAppointment(appointment: NewAppointment): Promise<MRSAppointment> {
+  async createAppointment(appointment: CreateAppointmentRequest): Promise<MRSAppointment> {
     if (!this.appointmentModuleAvailable) {
       throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
     }
 
-    const slotVerification = await this.verifySlotAvailable(appointment.slotMrsId);
-    if (!slotVerification.available) {
-      throw new SlotConflictError(appointment.slotMrsId);
+    // Validate required fields for datetime-based booking
+    if (!appointment.startDateTime || !appointment.endDateTime) {
+      throw new MRSValidationError('startDateTime and endDateTime are required for appointments');
+    }
+    if (!appointment.serviceId) {
+      throw new MRSValidationError('serviceId is required for Bahmni appointments');
     }
 
-    const body = {
-      patient: appointment.patientMrsId,
-      timeSlot: appointment.slotMrsId,
-      appointmentType: appointment.appointmentTypeMrsId,
-      reason: appointment.reason,
-      status: 'SCHEDULED',
+    const payload: {
+      patientUuid: string;
+      serviceUuid: string;
+      startDateTime: string;
+      endDateTime: string;
+      appointmentKind: string;
+      locationUuid?: string;
+      providers?: Array<{ uuid: string }>;
+      comments?: string;
+    } = {
+      patientUuid: appointment.patientMrsId,
+      serviceUuid: appointment.serviceId,
+      startDateTime: appointment.startDateTime.toISOString(),
+      endDateTime: appointment.endDateTime.toISOString(),
+      appointmentKind: 'Scheduled',
     };
 
-    const response = await this.client.post<unknown>(
-      '/appointmentscheduling/appointment',
-      body
-    );
+    if (appointment.locationId) {
+      payload.locationUuid = appointment.locationId;
+    }
+    if (appointment.providerId) {
+      payload.providers = [{ uuid: appointment.providerId }];
+    }
+    if (appointment.reason) {
+      payload.comments = appointment.reason;
+    }
+
+    const response = await this.client.createBahmniAppointment<BahmniAppointmentResponse>(payload);
 
     if (!response) {
       throw new MRSValidationError('Failed to create appointment - no response from MRS');
     }
 
-    return mapAppointment(response as Parameters<typeof mapAppointment>[0]);
+    return {
+      mrsId: response.uuid,
+      patientMrsId: response.patient.uuid,
+      providerMrsId: response.providers?.[0]?.uuid ?? '',
+      locationMrsId: response.location?.uuid,
+      appointmentTypeMrsId: response.service.uuid,
+      startTime: new Date(response.startDateTime),
+      endTime: new Date(response.endDateTime),
+      status: 'scheduled',
+      reason: response.comments,
+    };
   }
 
   async cancelAppointment(mrsId: string, reason?: string): Promise<void> {
@@ -399,17 +547,17 @@ export class OpenMRSAdapter implements MRSAdapter {
       throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
     }
 
-    const existing = await this.client.get<unknown>(
-      `/appointmentscheduling/appointment/${mrsId}`
-    );
+    // Verify appointment exists
+    const existing = await this.client.getAppointmentByUuid<BahmniAppointmentResponse>(mrsId);
 
     if (!existing) {
       throw new NotFoundError('Appointment', mrsId);
     }
 
-    await this.client.post(`/appointmentscheduling/appointment/${mrsId}`, {
-      status: 'CANCELLED',
-      cancelReason: reason,
+    // Update status to Cancelled (Bahmni uses PascalCase)
+    await this.client.updateBahmniAppointment(mrsId, {
+      status: 'Cancelled',
+      comments: reason,
     });
   }
 
@@ -418,18 +566,18 @@ export class OpenMRSAdapter implements MRSAdapter {
       throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
     }
 
-    const existing = await this.client.get<unknown>(
-      `/appointmentscheduling/appointment/${mrsId}`
-    );
+    // Verify appointment exists
+    const existing = await this.client.getAppointmentByUuid<BahmniAppointmentResponse>(mrsId);
 
     if (!existing) {
       throw new NotFoundError('Appointment', mrsId);
     }
 
-    const openMrsStatus = REVERSE_STATUS_MAP[status] ?? status.toUpperCase();
+    // Map to Bahmni status (PascalCase)
+    const bahmniStatus = BAHMNI_REVERSE_STATUS_MAP[status] ?? status;
 
-    await this.client.post(`/appointmentscheduling/appointment/${mrsId}`, {
-      status: openMrsStatus,
+    await this.client.updateBahmniAppointment(mrsId, {
+      status: bahmniStatus,
     });
   }
 

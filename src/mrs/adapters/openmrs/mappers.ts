@@ -10,8 +10,10 @@ import type {
   MRSAppointment,
   MRSAppointmentStatus,
   MRSSlot,
+  MRSScheduleConfig,
+  NewPatient,
 } from '../../types.js';
-import { STATUS_MAP } from './capabilities.js';
+import { STATUS_MAP, BAHMNI_STATUS_MAP } from './capabilities.js';
 
 // ============================================
 // OpenMRS API Response Types
@@ -130,16 +132,147 @@ function extractPhoneNumbers(person: OpenMRSPerson): MRSPhoneNumber[] {
   }
 
   return person.attributes
-    .filter(attr => attr.attributeType.display.toLowerCase().includes('phone'))
+    .filter(attr => attr.attributeType?.display?.toLowerCase().includes('phone'))
     .map((attr, index) => ({
       phone: attr.value,
-      phoneType: attr.attributeType.display.toLowerCase().includes('mobile') ? 'mobile' : 'home',
+      phoneType: attr.attributeType?.display?.toLowerCase().includes('mobile') ? 'mobile' : 'home',
       isPrimary: index === 0,
     }));
 }
 
 export function mapPatientList(response: { results: OpenMRSPatientResponse[] }): MRSPatient[] {
   return response.results.map(mapPatient);
+}
+
+// ============================================
+// Patient Creation Mappers
+// ============================================
+
+/**
+ * Luhn Mod-30 character set used by OpenMRS.
+ * Excludes confusing characters (I, O, S, B, Q, Z, L).
+ */
+const LUHN_MOD30_CHARS = '0123456789ACDEFGHJKLMNPRTUVWXY';
+
+/**
+ * Calculate Luhn Mod-30 check digit.
+ * Used by OpenMRS for identifier validation.
+ */
+function calculateLuhnMod30CheckDigit(identifier: string): string {
+  const chars = LUHN_MOD30_CHARS;
+  let sum = 0;
+  let isDouble = true; // Start with doubling (rightmost position before check digit)
+
+  // Process from right to left
+  for (let i = identifier.length - 1; i >= 0; i--) {
+    const char = identifier[i].toUpperCase();
+    let value = chars.indexOf(char);
+    if (value === -1) continue; // Skip invalid characters
+
+    if (isDouble) {
+      value *= 2;
+      if (value >= 30) {
+        value = Math.floor(value / 30) + (value % 30);
+      }
+    }
+    sum += value;
+    isDouble = !isDouble;
+  }
+
+  const checkDigit = (30 - (sum % 30)) % 30;
+  return chars[checkDigit];
+}
+
+/**
+ * Generate a valid OpenMRS identifier with Luhn Mod-30 check digit.
+ * Format: 6 random characters + 1 check digit (e.g., "M3G7K4Y")
+ */
+export function generateEliseIdentifier(): string {
+  const chars = LUHN_MOD30_CHARS;
+  let base = '';
+
+  // Generate 6 random characters from the valid character set
+  for (let i = 0; i < 6; i++) {
+    base += chars[Math.floor(Math.random() * chars.length)];
+  }
+
+  // Add Luhn Mod-30 check digit
+  const checkDigit = calculateLuhnMod30CheckDigit(base);
+  return base + checkDigit;
+}
+
+/**
+ * OpenMRS patient creation payload structure.
+ */
+export interface OpenMRSPatientPayload {
+  person: {
+    names: Array<{ givenName: string; familyName: string; preferred: boolean }>;
+    gender?: string;
+    birthdate: string;
+    attributes?: Array<{ attributeType: string; value: string }>;
+  };
+  identifiers: Array<{
+    identifier: string;
+    identifierType: string;
+    location: string;
+  }>;
+}
+
+/**
+ * Map NewPatient to OpenMRS patient creation payload.
+ * @param patient - The canonical patient data
+ * @param config - OpenMRS-specific UUIDs for phone attribute, identifier type, and location
+ */
+export function mapNewPatientToOpenMRS(
+  patient: NewPatient,
+  config: {
+    phoneAttributeTypeUuid?: string;
+    identifierTypeUuid: string;
+    identifierLocationUuid: string;
+  }
+): OpenMRSPatientPayload {
+  // Format birthdate as YYYY-MM-DD
+  const birthdate = patient.dateOfBirth.toISOString().split('T')[0];
+
+  // Build person attributes (phone number)
+  const attributes: Array<{ attributeType: string; value: string }> = [];
+  if (patient.phone && config.phoneAttributeTypeUuid) {
+    attributes.push({
+      attributeType: config.phoneAttributeTypeUuid,
+      value: patient.phone,
+    });
+  }
+
+  // Map gender to OpenMRS format (M, F, or O for other)
+  let gender: string | undefined;
+  if (patient.gender) {
+    const g = patient.gender.toLowerCase();
+    if (g === 'male' || g === 'm') gender = 'M';
+    else if (g === 'female' || g === 'f') gender = 'F';
+    else gender = 'O';
+  }
+
+  return {
+    person: {
+      names: [
+        {
+          givenName: patient.givenName,
+          familyName: patient.familyName,
+          preferred: true,
+        },
+      ],
+      gender,
+      birthdate,
+      attributes: attributes.length > 0 ? attributes : undefined,
+    },
+    identifiers: [
+      {
+        identifier: generateEliseIdentifier(),
+        identifierType: config.identifierTypeUuid,
+        location: config.identifierLocationUuid,
+      },
+    ],
+  };
 }
 
 // ============================================
@@ -251,7 +384,7 @@ export function mapLocationList(response: { results: OpenMRSLocationResponse[] }
 }
 
 // ============================================
-// Appointment Type Mappers
+// Appointment Type Mappers (Legacy)
 // ============================================
 
 export function mapAppointmentType(response: OpenMRSAppointmentTypeResponse): MRSAppointmentType {
@@ -268,11 +401,163 @@ export function mapAppointmentTypeList(response: { results: OpenMRSAppointmentTy
 }
 
 // ============================================
+// Bahmni API Response Types
+// ============================================
+
+export interface BahmniServiceType {
+  uuid: string;
+  name: string;
+  duration?: number;
+}
+
+export interface BahmniWeeklyAvailability {
+  dayOfWeek: string; // e.g., "MONDAY", "TUESDAY"
+  startTime: string; // e.g., "09:00:00"
+  endTime: string;   // e.g., "17:00:00"
+  maxAppointmentsLimit?: number;
+}
+
+export interface BahmniAppointmentServiceResponse {
+  uuid: string;
+  name: string;
+  description?: string | null;
+  durationMins?: number | null;
+  serviceTypes?: BahmniServiceType[];
+  speciality?: { name: string; uuid: string } | null;
+  location?: { uuid: string; name: string } | null;
+  weeklyAvailability?: BahmniWeeklyAvailability[];
+  maxAppointmentsLimit?: number;
+}
+
+export interface BahmniAppointmentResponse {
+  uuid: string;
+  patient: {
+    uuid: string;
+    identifier?: string;
+    name?: string;
+  };
+  service: {
+    uuid: string;
+    name: string;
+  };
+  serviceType?: {
+    uuid: string;
+    name: string;
+  } | null;
+  location?: {
+    uuid: string;
+    name: string;
+  } | null;
+  providers?: Array<{
+    uuid: string;
+    name?: string;
+    response?: string;
+  }>;
+  startDateTime: number; // Unix timestamp in milliseconds
+  endDateTime: number;
+  status: string;
+  appointmentKind?: string;
+  comments?: string;
+  recurring?: boolean;
+  voided?: boolean;
+}
+
+// ============================================
+// Bahmni Appointment Service Mappers
+// ============================================
+
+export function mapBahmniAppointmentService(response: BahmniAppointmentServiceResponse): MRSAppointmentType {
+  // Use service duration, or first service type duration if available
+  const duration = response.durationMins ?? response.serviceTypes?.[0]?.duration;
+
+  return {
+    mrsId: response.uuid,
+    name: response.name,
+    durationMinutes: duration ?? undefined,
+    description: response.description ?? undefined,
+  };
+}
+
+export function mapBahmniAppointmentServiceList(response: BahmniAppointmentServiceResponse[]): MRSAppointmentType[] {
+  return response.map(mapBahmniAppointmentService);
+}
+
+// ============================================
+// Schedule Config Mappers
+// ============================================
+
+const DAY_OF_WEEK_MAP: Record<string, number> = {
+  'SUNDAY': 0,
+  'MONDAY': 1,
+  'TUESDAY': 2,
+  'WEDNESDAY': 3,
+  'THURSDAY': 4,
+  'FRIDAY': 5,
+  'SATURDAY': 6,
+};
+
+/**
+ * Map a Bahmni appointment service to MRSScheduleConfig.
+ */
+export function mapBahmniServiceToScheduleConfig(response: BahmniAppointmentServiceResponse): MRSScheduleConfig {
+  const weeklyAvailability = (response.weeklyAvailability ?? []).map(wa => ({
+    dayOfWeek: DAY_OF_WEEK_MAP[wa.dayOfWeek.toUpperCase()] ?? 0,
+    startTime: wa.startTime.substring(0, 5), // Convert "09:00:00" to "09:00"
+    endTime: wa.endTime.substring(0, 5),
+  }));
+
+  return {
+    serviceId: response.uuid,
+    serviceName: response.name,
+    durationMins: response.durationMins ?? 30,
+    weeklyAvailability,
+    locationId: response.location?.uuid,
+    maxAppointmentsPerSlot: response.maxAppointmentsLimit,
+  };
+}
+
+/**
+ * Map multiple Bahmni services to MRSScheduleConfig array.
+ */
+export function mapBahmniServicesToScheduleConfigs(response: BahmniAppointmentServiceResponse[]): MRSScheduleConfig[] {
+  return response.map(mapBahmniServiceToScheduleConfig);
+}
+
+// ============================================
 // Appointment Mappers
 // ============================================
 
 export function mapAppointmentStatus(openMrsStatus: string): MRSAppointmentStatus {
   return (STATUS_MAP[openMrsStatus.toUpperCase()] ?? 'scheduled') as MRSAppointmentStatus;
+}
+
+export function mapBahmniStatus(bahmniStatus: string): MRSAppointmentStatus {
+  return (BAHMNI_STATUS_MAP[bahmniStatus] ?? 'scheduled') as MRSAppointmentStatus;
+}
+
+// ============================================
+// Bahmni Appointment Mappers
+// ============================================
+
+export function mapBahmniAppointment(response: BahmniAppointmentResponse): MRSAppointment {
+  // Get first provider if available
+  const providerUuid = response.providers?.[0]?.uuid ?? '';
+
+  return {
+    mrsId: response.uuid,
+    patientMrsId: response.patient.uuid,
+    providerMrsId: providerUuid,
+    locationMrsId: response.location?.uuid,
+    appointmentTypeMrsId: response.service.uuid,
+    startTime: new Date(response.startDateTime),
+    endTime: new Date(response.endDateTime),
+    status: mapBahmniStatus(response.status),
+    reason: response.comments,
+  };
+}
+
+export function mapBahmniAppointmentList(response: BahmniAppointmentResponse[]): MRSAppointment[] {
+  return response.filter(apt => !apt.voided).map(mapBahmniAppointment);
 }
 
 export function mapAppointment(response: OpenMRSAppointmentResponse): MRSAppointment {

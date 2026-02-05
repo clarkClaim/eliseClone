@@ -23,6 +23,18 @@ export interface MRSCapabilities {
     supportsStatuses: string[];
   };
 
+  /** Scheduling model capabilities */
+  scheduling: {
+    /** Whether this MRS uses slots or direct datetime booking */
+    model: 'appointment_based' | 'slot_based';
+    /** Whether MRS can provide service/schedule configuration */
+    supportsScheduleConfig: boolean;
+    /** Default appointment duration in minutes */
+    defaultSlotDuration: number;
+    /** Whether serviceId is required for booking */
+    requiresServiceId: boolean;
+  };
+
   sync: {
     supportsIncrementalSync: boolean;
     supportsWebhooks: boolean;
@@ -57,6 +69,19 @@ export interface MRSPhoneNumber {
   phone: string;
   phoneType?: 'mobile' | 'home' | 'work' | string;
   isPrimary: boolean;
+}
+
+/**
+ * Input type for creating a new patient in the MRS.
+ * Used by adapter.createPatient().
+ */
+export interface NewPatient {
+  givenName: string;
+  familyName: string;
+  dateOfBirth: Date;
+  gender?: string;
+  phone?: string;
+  phoneType?: 'mobile' | 'home';
 }
 
 export interface MRSProvider {
@@ -100,6 +125,11 @@ export interface MRSAppointment {
   cancelReason?: string;
 }
 
+/**
+ * @deprecated Slot-based availability is being replaced by datetime-based scheduling.
+ * Use ScheduleTemplate + computed availability instead.
+ * This type is retained for slot-based MRS adapters only.
+ */
 export interface MRSSlot {
   mrsId: string;
   providerMrsId: string;
@@ -108,6 +138,46 @@ export interface MRSSlot {
   startTime: Date;
   endTime: Date;
   isBooked: boolean;
+}
+
+// ============================================
+// SCHEDULE CONFIGURATION
+// ============================================
+
+/** Service/schedule configuration from MRS */
+export interface MRSScheduleConfig {
+  serviceId: string;
+  serviceName: string;
+  durationMins: number;
+  /** Weekly availability by day of week (0=Sunday through 6=Saturday) */
+  weeklyAvailability: Array<{
+    dayOfWeek: number;
+    startTime: string; // HH:MM format
+    endTime: string;   // HH:MM format
+  }>;
+  locationId?: string;
+  maxAppointmentsPerSlot?: number;
+}
+
+// ============================================
+// CONFLICT DETECTION
+// ============================================
+
+/** Request to check for scheduling conflicts */
+export interface ConflictCheckRequest {
+  startDateTime: Date;
+  endDateTime: Date;
+  providerId?: string;
+  serviceId?: string;
+  /** Exclude this appointment from conflict check (for reschedule) */
+  excludeAppointmentId?: string;
+}
+
+/** Result of conflict check */
+export interface ConflictCheckResult {
+  hasConflict: boolean;
+  conflictingAppointments?: MRSAppointment[];
+  reason?: string;
 }
 
 // Query types for adapter methods
@@ -131,21 +201,57 @@ export interface DateRange {
   end: Date;
 }
 
-export interface NewAppointment {
+/**
+ * Request to create an appointment using datetime-based booking.
+ * This is the primary interface for creating appointments across all MRS types.
+ */
+export interface CreateAppointmentRequest {
   patientMrsId: string;
-  providerMrsId: string;
-  slotMrsId: string;
-  appointmentTypeMrsId?: string;
+  /** Appointment start time */
+  startDateTime: Date;
+  /** Appointment end time */
+  endDateTime: Date;
+  /** Service/appointment type ID (required for Bahmni) */
+  serviceId?: string;
+  /** Provider ID */
+  providerId?: string;
+  /** Location ID */
+  locationId?: string;
+  /** Reason/comments for the appointment */
   reason?: string;
 }
 
-// Alias for design compatibility
-export type CreateAppointmentRequest = NewAppointment;
+/**
+ * @deprecated Use CreateAppointmentRequest instead.
+ * This type is retained for backwards compatibility.
+ */
+export interface NewAppointment {
+  patientMrsId: string;
+  providerMrsId?: string;
+  /** Bahmni: service UUID (appointment type) */
+  serviceUuid: string;
+  /** Bahmni: appointment start time */
+  startDateTime: Date;
+  /** Bahmni: appointment end time */
+  endDateTime: Date;
+  /** Optional location UUID */
+  locationMrsId?: string;
+  /** Optional reason/comments for the appointment */
+  reason?: string;
+  /** @deprecated Use serviceUuid instead */
+  appointmentTypeMrsId?: string;
+  /** @deprecated Bahmni doesn't use slots - use startDateTime/endDateTime */
+  slotMrsId?: string;
+}
 
 // ============================================
 // SLOT VERIFICATION
 // ============================================
 
+/**
+ * @deprecated Use ConflictCheckResult instead.
+ * Slot verification is being replaced by datetime-based conflict checking.
+ */
 export interface SlotVerificationResult {
   available: boolean;
   slot?: MRSSlot;

@@ -3,8 +3,9 @@
 
 import { prisma } from '../db/client.js';
 import type { MRSAdapter } from '../mrs/adapter.js';
-import type { MRSPatient, MRSProvider, MRSAppointment, MRSSlot } from '../mrs/types.js';
+import type { MRSPatient, MRSProvider, MRSAppointment, MRSSlot, NewPatient } from '../mrs/types.js';
 import { MRSError } from '../mrs/errors.js';
+import { syncScheduleTemplates } from './entities/schedule-templates.js';
 
 const DEFAULT_SYNC_INTERVAL_MS = 300000; // 5 minutes
 const DEFAULT_MAX_REQUESTS_PER_CYCLE = 20; // Leave bandwidth for real-time ops
@@ -128,11 +129,14 @@ export class SyncService {
     console.log('[Sync] Starting sync cycle');
 
     try {
-      // Sync in order: providers, patients, availability, appointments
+      // Sync in order: providers, patients, schedule templates, availability, appointments
       await this.syncProviders();
       await this.syncPatients();
+      await this.syncScheduleTemplates();
       await this.syncAvailability();
       await this.syncAppointmentsFromMRS();
+      // Push local entities to MRS (patients before appointments)
+      await this.pushPatientsToMRS();
       await this.pushAppointmentsToMRS();
 
       const duration = Date.now() - startTime;
@@ -190,6 +194,32 @@ export class SyncService {
         specialty: provider.specialty,
       },
     });
+  }
+
+  // ============================================
+  // Schedule Template Sync
+  // ============================================
+
+  private async syncScheduleTemplates(): Promise<void> {
+    const syncStart = Date.now();
+
+    try {
+      console.log('[Sync] Syncing schedule templates from MRS...');
+
+      const result = await syncScheduleTemplates(this.adapter);
+
+      const duration = Date.now() - syncStart;
+      console.log(
+        `[Sync] Schedule templates: ${result.created} created, ${result.updated} updated in ${duration}ms`
+      );
+
+      if (result.errors.length > 0) {
+        console.warn(`[Sync] Schedule template errors: ${result.errors.join(', ')}`);
+      }
+    } catch (error) {
+      console.error('[Sync] Schedule template sync failed:', error);
+      // Don't throw - schedule template sync is not critical
+    }
   }
 
   // ============================================
@@ -531,6 +561,10 @@ export class SyncService {
           mrsId: appt.mrsId,
           patientId,
           slotId: slot.id,
+          startTime: appt.startTime,
+          endTime: appt.endTime,
+          providerId: slot.providerId,
+          serviceId: slot.appointmentTypeId,
           status: appt.status,
           reason: appt.reason,
           cancelReason: appt.cancelReason,
@@ -579,17 +613,129 @@ export class SyncService {
   // Push to MRS
   // ============================================
 
+  private async pushPatientsToMRS(): Promise<void> {
+    // Find unsynced patients (local-only, not yet pushed to MRS)
+    const unpushed = await prisma.patient.findMany({
+      where: {
+        syncedToMrs: false,
+        mrsId: { startsWith: 'local-' },
+        syncAttempts: { lt: 5 }, // Max 5 retry attempts
+      },
+      include: {
+        phones: true,
+      },
+    });
+
+    console.log(`[Sync] Found ${unpushed.length} patients to push to MRS`);
+
+    for (const patient of unpushed) {
+      // Skip patients missing required fields
+      if (!patient.givenName || !patient.familyName || !patient.dob) {
+        const missingFields = [];
+        if (!patient.givenName) missingFields.push('givenName');
+        if (!patient.familyName) missingFields.push('familyName');
+        if (!patient.dob) missingFields.push('dob');
+
+        console.warn(`[Sync] Skipping patient ${patient.id} - missing required fields: ${missingFields.join(', ')}`);
+
+        await prisma.patient.update({
+          where: { id: patient.id },
+          data: {
+            lastSyncError: `Missing required fields for MRS: ${missingFields.join(', ')}`,
+          },
+        });
+        continue;
+      }
+
+      await this.pushPatientToMRS(patient);
+    }
+  }
+
+  private async pushPatientToMRS(patient: {
+    id: string;
+    givenName: string | null;
+    familyName: string | null;
+    dob: Date | null;
+    gender: string | null;
+    phones: Array<{ phone: string; phoneType: string | null }>;
+    syncAttempts: number;
+  }): Promise<void> {
+    try {
+      const primaryPhone = patient.phones[0];
+
+      const newPatient: NewPatient = {
+        givenName: patient.givenName!,
+        familyName: patient.familyName!,
+        dateOfBirth: patient.dob!,
+        gender: patient.gender ?? undefined,
+        phone: primaryPhone?.phone,
+        phoneType: (primaryPhone?.phoneType as 'mobile' | 'home') ?? 'mobile',
+      };
+
+      const mrsPatient = await this.adapter.createPatient(newPatient);
+
+      await prisma.patient.update({
+        where: { id: patient.id },
+        data: {
+          mrsId: mrsPatient.mrsId,
+          syncedToMrs: true,
+          syncedToMrsAt: new Date(),
+          lastSyncError: null,
+          syncAttempts: patient.syncAttempts + 1,
+        },
+      });
+
+      console.log(`[Sync] Pushed patient ${patient.id} to MRS as ${mrsPatient.mrsId}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      await prisma.patient.update({
+        where: { id: patient.id },
+        data: {
+          lastSyncError: errorMessage,
+          syncAttempts: patient.syncAttempts + 1,
+        },
+      });
+
+      // Create retry job with exponential backoff
+      await this.createPatientRetryJob(patient.id, patient.syncAttempts);
+
+      console.error(`[Sync] Failed to push patient ${patient.id}:`, errorMessage);
+    }
+  }
+
+  private async createPatientRetryJob(patientId: string, currentAttempts: number): Promise<void> {
+    const backoffExponent = currentAttempts + 1;
+    const delayMs = BASE_BACKOFF_MS * Math.pow(2, backoffExponent - 1);
+    const nextRetryAt = new Date(Date.now() + delayMs);
+
+    await prisma.job.create({
+      data: {
+        type: 'sync_patient_push',
+        payload: { patientId },
+        runAt: nextRetryAt,
+        backoffExponent,
+        nextRetryAt,
+      },
+    });
+  }
+
   private async pushAppointmentsToMRS(): Promise<void> {
-    // Find appointments that need to be pushed
+    // Find appointments that need to be pushed (with slots - legacy flow)
     const unpushed = await prisma.appointment.findMany({
       where: {
         syncedToMrs: false,
         status: { not: 'cancelled' },
+        slotId: { not: null }, // Only legacy slot-based appointments
       },
       include: {
         patient: true,
         slot: {
-          include: { provider: true },
+          include: {
+            provider: true,
+            appointmentType: true,
+            location: true,
+          },
         },
       },
     });
@@ -597,26 +743,42 @@ export class SyncService {
     console.log(`[Sync] Pushing ${unpushed.length} appointments to MRS`);
 
     for (const appt of unpushed) {
-      await this.pushAppointmentToMRS(appt);
+      if (!appt.slot) continue; // Should not happen due to filter
+      await this.pushAppointmentToMRS({
+        ...appt,
+        slot: appt.slot,
+      });
     }
   }
 
   private async pushAppointmentToMRS(appt: {
     id: string;
     patient: { mrsId: string };
-    slot: { mrsId: string | null; provider: { mrsId: string } };
+    slot: {
+      mrsId: string | null;
+      startTime: Date;
+      endTime: Date;
+      provider: { mrsId: string };
+      appointmentType?: { mrsId: string } | null;
+      location?: { mrsId: string } | null;
+    };
     reason: string | null;
     syncAttempts: number;
   }): Promise<void> {
     try {
-      if (!appt.slot.mrsId) {
-        throw new Error('Cannot push appointment - slot has no MRS ID');
+      // Bahmni uses service-based booking (no slots)
+      // We need: serviceUuid (from appointmentType), start/end times
+      if (!appt.slot.appointmentType?.mrsId) {
+        throw new Error('Cannot push appointment - appointment type (service) not set');
       }
 
       const created = await this.adapter.createAppointment({
         patientMrsId: appt.patient.mrsId,
-        providerMrsId: appt.slot.provider.mrsId,
-        slotMrsId: appt.slot.mrsId,
+        providerId: appt.slot.provider.mrsId,
+        serviceId: appt.slot.appointmentType.mrsId,
+        startDateTime: appt.slot.startTime,
+        endDateTime: appt.slot.endTime,
+        locationId: appt.slot.location?.mrsId,
         reason: appt.reason ?? undefined,
       });
 

@@ -1,15 +1,15 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: elise-postgres
+    container_name: elise-postgres-${PROFILE:-mrs}
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: elise_clone
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - elise_data_${PROFILE:-mrs}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -17,4 +17,5 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
+  elise_data_mrs:
+  elise_data_emr:

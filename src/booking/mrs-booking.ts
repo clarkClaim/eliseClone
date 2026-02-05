@@ -203,11 +203,18 @@ export async function bookAppointment(
       };
     }
 
+    // Bahmni uses service-based booking with explicit start/end times
+    if (!slot.appointmentType?.mrsId) {
+      throw new Error('Cannot create MRS appointment - appointment type (service) not set');
+    }
+
     const mrsAppointment = await adapter.createAppointment({
       patientMrsId: patient.mrsId,
-      providerMrsId: slot.provider.mrsId,
-      slotMrsId: slot.mrsId,
-      appointmentTypeMrsId: slot.appointmentType?.mrsId,
+      providerId: slot.provider.mrsId,
+      serviceId: slot.appointmentType.mrsId,
+      startDateTime: slot.startTime,
+      endDateTime: slot.endTime,
+      locationId: slot.location?.mrsId,
       reason: request.reason,
     });
 
@@ -216,6 +223,10 @@ export async function bookAppointment(
         mrsId: mrsAppointment.mrsId,
         patientId: request.patientId,
         slotId: request.slotId,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        providerId: slot.providerId,
+        serviceId: slot.appointmentTypeId,
         status: 'scheduled',
         reason: request.reason,
         bookedVia: 'voice',
@@ -288,7 +299,7 @@ export async function bookAppointment(
  */
 async function bookLocally(
   request: BookingRequest,
-  slot: Awaited<ReturnType<typeof prisma.availability.findUnique>> & { provider: { name: string }; location?: { name: string } | null },
+  slot: NonNullable<Awaited<ReturnType<typeof prisma.availability.findUnique>>> & { provider: { name: string }; location?: { name: string } | null },
   patient: { id: string; mrsId: string },
   reason: string
 ): Promise<BookingResponse> {
@@ -298,6 +309,10 @@ async function bookLocally(
     data: {
       patientId: request.patientId,
       slotId: request.slotId,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      providerId: slot.providerId,
+      serviceId: slot.appointmentTypeId,
       status: 'scheduled',
       reason: request.reason,
       bookedVia: 'voice',
@@ -366,10 +381,13 @@ export async function cancelAppointment(
       },
     });
 
-    await prisma.availability.update({
-      where: { id: appointment.slotId },
-      data: { isBooked: false },
-    });
+    // Release slot if this appointment has one (legacy slot-based flow)
+    if (appointment.slotId) {
+      await prisma.availability.update({
+        where: { id: appointment.slotId },
+        data: { isBooked: false },
+      });
+    }
 
     await prisma.job.deleteMany({
       where: {
@@ -399,15 +417,18 @@ export async function cancelAppointment(
       },
     });
 
-    await prisma.availability.update({
-      where: { id: appointment.slotId },
-      data: { isBooked: false },
-    });
+    // Release slot if this appointment has one (legacy slot-based flow)
+    if (appointment.slotId) {
+      await prisma.availability.update({
+        where: { id: appointment.slotId },
+        data: { isBooked: false },
+      });
+    }
 
     await createCancellationPushJob(
       request.appointmentId,
       appointment.mrsId,
-      request.reason,
+      request.reason ?? undefined,
       { priority: 10 }
     );
 
@@ -430,10 +451,13 @@ export async function cancelAppointment(
       },
     });
 
-    await prisma.availability.update({
-      where: { id: appointment.slotId },
-      data: { isBooked: false },
-    });
+    // Release slot if this appointment has one (legacy slot-based flow)
+    if (appointment.slotId) {
+      await prisma.availability.update({
+        where: { id: appointment.slotId },
+        data: { isBooked: false },
+      });
+    }
 
     return {
       success: true,
@@ -449,15 +473,18 @@ export async function cancelAppointment(
       },
     });
 
-    await prisma.availability.update({
-      where: { id: appointment.slotId },
-      data: { isBooked: false },
-    });
+    // Release slot if this appointment has one (legacy slot-based flow)
+    if (appointment.slotId) {
+      await prisma.availability.update({
+        where: { id: appointment.slotId },
+        data: { isBooked: false },
+      });
+    }
 
     await createCancellationPushJob(
       request.appointmentId,
       appointment.mrsId,
-      request.reason,
+      request.reason ?? undefined,
       { priority: 10 }
     );
 

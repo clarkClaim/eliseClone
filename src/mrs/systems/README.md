@@ -3,15 +3,17 @@
 This document describes the capabilities and characteristics of supported Medical Record Systems (MRS).
 Use this as a reference when implementing new adapters or understanding system limitations.
 
-## OpenMRS
+## OpenMRS (with Bahmni Appointments)
 
 **Status:** Implemented (`src/mrs/adapters/openmrs/`)
+
+Uses the Bahmni Appointments module (standard on O3, not the legacy `appointmentscheduling` module).
 
 ```yaml
 system: openmrs
 auth: Basic Auth (username:password base64)
 baseUrl: /openmrs/ws/rest/v1/
-appointmentModule: /appointmentscheduling/ (separate install)
+appointmentModule: Bahmni (/appointment/, /appointmentService/)
 
 capabilities:
   patientSearch:
@@ -22,12 +24,12 @@ capabilities:
     globalSearch: true
 
   appointments:
-    canCreate: true
-    canCancel: true  # Set status to CANCELLED
-    canReschedule: false  # Must cancel + create new
+    canCreate: true   # POST /appointment
+    canCancel: true   # Update status to Cancelled
+    canReschedule: true  # POST /appointment/{uuid}/reschedule
     canQueryByDateRange: true
     canQueryByPatient: true
-    supportsStatuses: [SCHEDULED, ARRIVED, IN_SERVICE, COMPLETED, CANCELLED, MISSED]
+    supportsStatuses: [Scheduled, CheckedIn, Completed, Cancelled, Missed]
 
   sync:
     supportsIncrementalSync: false
@@ -40,9 +42,10 @@ capabilities:
     burstLimit: 10
 
   notes:
-    - Demo instance resets periodically
-    - Time slot duration configured in UI only
-    - Appointment requires existing time slot
+    - Demo instance (o3.openmrs.org) resets periodically
+    - Uses service-based booking (no discrete timeslots)
+    - Appointments booked with explicit start/end times
+    - Services define availability windows (weeklyAvailability)
     - FHIR module doesn't support Appointment/Schedule/Slot resources
 ```
 

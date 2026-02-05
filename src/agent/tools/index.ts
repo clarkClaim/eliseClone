@@ -1,4 +1,14 @@
-import { identifyPatient, IdentifyPatientParams, IdentifyPatientResult } from './identify-patient.js';
+import { identifyPatient, IdentifyPatientParams } from './identify-patient.js';
+import { saveNewPatient, SaveNewPatientParams, setMRSAdapterForPatient } from './save-new-patient.js';
+import { getAvailability, GetAvailabilityParams } from './get-availability.js';
+import { bookAppointment, BookAppointmentParams, setMRSAdapter as setBookingAdapter } from './book-appointment.js';
+import type { MRSAdapter } from '../../mrs/adapter.js';
+
+// Set MRS adapter for all tools that need it
+export function setMRSAdapter(adapter: MRSAdapter | null): void {
+  setBookingAdapter(adapter);
+  setMRSAdapterForPatient(adapter);
+}
 
 // VAPI tool call request format
 export interface VapiToolCallRequest {
@@ -37,14 +47,32 @@ const tools: Record<string, ToolHandler> = {
     const params = args as unknown as IdentifyPatientParams;
     return identifyPatient(params, callId);
   },
+  save_new_patient: async (args, callId) => {
+    const params = args as unknown as SaveNewPatientParams;
+    return saveNewPatient(params, callId);
+  },
+  get_availability: async (args) => {
+    const params = args as unknown as GetAvailabilityParams;
+    return getAvailability(params);
+  },
+  book_appointment: async (args, callId) => {
+    const params = args as unknown as BookAppointmentParams;
+    return bookAppointment(params, callId);
+  },
 };
+
+// Tools that should automatically receive caller's phone from caller ID
+const TOOLS_NEEDING_CALLER_PHONE = ['identify_patient', 'save_new_patient'];
 
 // Handle incoming VAPI tool calls
 export async function handleToolCall(request: VapiToolCallRequest): Promise<VapiToolCallResponse> {
   const results: VapiToolCallResponse['results'] = [];
 
   const callId = request.message.call?.id;
+  const callerPhone = request.message.call?.customer?.number;
   const toolCalls = request.message.toolCallList || [];
+
+  console.log(`[Tools] Call ID: ${callId}, Caller phone: ${callerPhone}`);
 
   for (const toolCall of toolCalls) {
     const { id: toolCallId, function: fn } = toolCall;
@@ -60,8 +88,20 @@ export async function handleToolCall(request: VapiToolCallRequest): Promise<Vapi
       continue;
     }
 
+    // Handle phone numbers for tools that need caller phone
+    let args = { ...fn.arguments };
+    if (TOOLS_NEEDING_CALLER_PHONE.includes(fn.name) && callerPhone) {
+      // Use caller ID as default, but LLM-provided phone overrides if present
+      if (args.phone) {
+        console.log(`[Tools] LLM provided phone for ${fn.name}: ${args.phone} (caller ID: ${callerPhone})`);
+      } else {
+        args.phone = callerPhone;
+        console.log(`[Tools] Using caller ID phone for ${fn.name}: ${callerPhone}`);
+      }
+    }
+
     try {
-      const result = await handler(fn.arguments, callId);
+      const result = await handler(args, callId);
       results.push({
         toolCallId,
         result: JSON.stringify(result),

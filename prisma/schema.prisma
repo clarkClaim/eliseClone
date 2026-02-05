@@ -21,6 +21,11 @@ model Patient {
   familyName String?  @map("family_name")
   dob        DateTime? @db.Date
   gender     String?
+  // MRS sync tracking
+  syncedToMrs    Boolean   @default(false) @map("synced_to_mrs")
+  syncedToMrsAt  DateTime? @map("synced_to_mrs_at")
+  lastSyncError  String?   @map("last_sync_error")
+  syncAttempts   Int       @default(0) @map("sync_attempts")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
@@ -30,6 +35,7 @@ model Patient {
   conversations  Conversation[]
   escalations    Escalation[]
 
+  @@index([syncedToMrs]) // For finding patients to push to MRS
   @@map("patients")
 }
 
@@ -54,8 +60,10 @@ model Provider {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  availability    Availability[]
-  waitlistEntries WaitlistEntry[]
+  availability      Availability[]
+  waitlistEntries   WaitlistEntry[]
+  scheduleTemplates ScheduleTemplate[]
+  appointments      Appointment[]
 
   @@map("providers")
 }
@@ -80,8 +88,10 @@ model AppointmentType {
   durationMinutes Int?    @map("duration_minutes")
   description     String?
 
-  availability    Availability[]
-  waitlistEntries WaitlistEntry[]
+  availability      Availability[]
+  waitlistEntries   WaitlistEntry[]
+  scheduleTemplates ScheduleTemplate[]
+  appointments      Appointment[]
 
   @@map("appointment_types")
 }
@@ -89,6 +99,29 @@ model AppointmentType {
 // ============================================
 // SCHEDULING
 // ============================================
+
+model ScheduleTemplate {
+  id               String          @id @default(uuid())
+  providerId       String          @map("provider_id")
+  serviceId        String?         @map("service_id")
+  dayOfWeek        Int             @map("day_of_week") // 0=Sunday through 6=Saturday
+  startTime        String          @map("start_time") // HH:MM format e.g. "09:00"
+  endTime          String          @map("end_time") // HH:MM format e.g. "17:00"
+  slotDurationMins Int             @default(30) @map("slot_duration_mins")
+  effectiveFrom    DateTime        @default(now()) @map("effective_from")
+  effectiveTo      DateTime?       @map("effective_to")
+  source           ScheduleSource  @default(local)
+  mrsServiceId     String?         @map("mrs_service_id")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  provider Provider         @relation(fields: [providerId], references: [id])
+  service  AppointmentType? @relation(fields: [serviceId], references: [id])
+
+  @@unique([providerId, serviceId, dayOfWeek, effectiveFrom])
+  @@index([providerId, dayOfWeek])
+  @@map("schedule_templates")
+}
 
 model Availability {
   id                String    @id @default(uuid())
@@ -126,11 +159,23 @@ enum AppointmentStatus {
   @@map("appointment_status")
 }
 
+enum ScheduleSource {
+  local
+  mrs_synced
+
+  @@map("schedule_source")
+}
+
 model Appointment {
   id           String            @id @default(uuid())
   mrsId        String?           @unique @map("mrs_id") // OpenMRS appointment UUID
   patientId    String            @map("patient_id")
-  slotId       String            @unique @map("slot_id")
+  slotId       String?           @unique @map("slot_id") // Optional for datetime-based booking
+  // Direct time fields for datetime-based booking
+  startTime    DateTime          @map("start_time")
+  endTime      DateTime          @map("end_time")
+  providerId   String?           @map("provider_id") // Direct provider reference
+  serviceId    String?           @map("service_id") // Direct service/appointment type reference
   status       AppointmentStatus @default(scheduled)
   reason       String?
   cancelReason String?           @map("cancel_reason")
@@ -144,12 +189,15 @@ model Appointment {
   createdAt    DateTime          @default(now()) @map("created_at")
   updatedAt    DateTime          @updatedAt @map("updated_at")
 
-  patient Patient      @relation(fields: [patientId], references: [id])
-  slot    Availability @relation(fields: [slotId], references: [id])
+  patient  Patient       @relation(fields: [patientId], references: [id])
+  slot     Availability? @relation(fields: [slotId], references: [id])
+  provider Provider?     @relation(fields: [providerId], references: [id])
+  service  AppointmentType? @relation(fields: [serviceId], references: [id])
 
   @@index([patientId, status])
   @@index([status])
   @@index([syncedToMrs]) // For finding appointments to push to MRS
+  @@index([providerId, startTime]) // For conflict detection
   @@map("appointments")
 }
 

@@ -81,10 +81,11 @@ export async function identifyPatient(
         },
       };
     } else {
-      // DOB doesn't match
+      // DOB doesn't match - caller may be using someone else's phone
+      // Fall back to name + DOB lookup
       return {
-        status: 'verification_failed',
-        message: 'The date of birth provided does not match our records.',
+        status: 'not_found_try_name',
+        message: 'I couldn\'t verify you by phone number. Could you please tell me your full name?',
       };
     }
   }

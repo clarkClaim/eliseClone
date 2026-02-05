@@ -134,8 +134,8 @@ export async function handleDemoReset(): Promise<ResetHandlingResult> {
         localState: {
           appointmentId: appt.id,
           patientName: appt.patient.name,
-          providerName: appt.slot.provider.name,
-          startTime: appt.slot.startTime.toISOString(),
+          providerName: appt.slot?.provider.name ?? 'Unknown',
+          startTime: appt.startTime.toISOString(),
           bookedVia: appt.bookedVia,
           createdAt: appt.createdAt.toISOString(),
         },

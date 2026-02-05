@@ -1,6 +1,10 @@
-import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { loadEnv } from '../src/utils/env.js';
+import { PrismaClient, ScheduleSource } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+
+// Load environment with profile support
+const { profile } = loadEnv();
+console.log(`Using profile: ${profile}`);
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -9,6 +13,69 @@ if (!connectionString) {
 
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
+
+// ============================================
+// Test Providers
+// ============================================
+
+const testProviders = [
+  {
+    mrsId: 'test-provider-001',
+    name: 'Dr. Smith',
+    specialty: 'General Practice',
+  },
+  {
+    mrsId: 'test-provider-002',
+    name: 'Dr. Jones',
+    specialty: 'Internal Medicine',
+  },
+];
+
+// ============================================
+// Test Services (Appointment Types)
+// ============================================
+
+const testServices = [
+  {
+    mrsId: 'test-service-001',
+    name: 'General Checkup',
+    durationMinutes: 30,
+    description: 'Annual health checkup',
+  },
+  {
+    mrsId: 'test-service-002',
+    name: 'Follow-up Visit',
+    durationMinutes: 15,
+    description: 'Follow-up consultation',
+  },
+  {
+    mrsId: 'test-service-003',
+    name: 'New Patient Consultation',
+    durationMinutes: 60,
+    description: 'Initial consultation for new patients',
+  },
+];
+
+// ============================================
+// Schedule Templates
+// ============================================
+
+// Dr. Smith: M/W/F 9am-5pm
+const drSmithSchedule = [
+  { dayOfWeek: 1, startTime: '09:00', endTime: '17:00' }, // Monday
+  { dayOfWeek: 3, startTime: '09:00', endTime: '17:00' }, // Wednesday
+  { dayOfWeek: 5, startTime: '09:00', endTime: '17:00' }, // Friday
+];
+
+// Dr. Jones: T/Th 8am-3pm
+const drJonesSchedule = [
+  { dayOfWeek: 2, startTime: '08:00', endTime: '15:00' }, // Tuesday
+  { dayOfWeek: 4, startTime: '08:00', endTime: '15:00' }, // Thursday
+];
+
+// ============================================
+// Test Patients
+// ============================================
 
 // Test patients with realistic but obviously fake data
 // Uses 555 prefix for phone numbers (reserved for fictional use)
@@ -103,8 +170,126 @@ const testPatients = [
   },
 ];
 
-async function main() {
-  console.log('Seeding database with test patients...');
+async function seedProviders() {
+  console.log('\nSeeding providers...');
+
+  const providers: { id: string; name: string; mrsId: string }[] = [];
+
+  for (const provider of testProviders) {
+    const upserted = await prisma.provider.upsert({
+      where: { mrsId: provider.mrsId },
+      update: {
+        name: provider.name,
+        specialty: provider.specialty,
+      },
+      create: provider,
+    });
+    providers.push(upserted);
+    console.log(`  ✓ Provider: ${upserted.name} (${upserted.mrsId})`);
+  }
+
+  return providers;
+}
+
+async function seedServices() {
+  console.log('\nSeeding services (appointment types)...');
+
+  const services: { id: string; name: string; mrsId: string }[] = [];
+
+  for (const service of testServices) {
+    const upserted = await prisma.appointmentType.upsert({
+      where: { mrsId: service.mrsId },
+      update: {
+        name: service.name,
+        durationMinutes: service.durationMinutes,
+        description: service.description,
+      },
+      create: service,
+    });
+    services.push(upserted);
+    console.log(`  ✓ Service: ${upserted.name} (${upserted.mrsId})`);
+  }
+
+  return services;
+}
+
+async function upsertScheduleTemplate(
+  providerId: string,
+  dayOfWeek: number,
+  startTime: string,
+  endTime: string,
+  slotDurationMins: number
+) {
+  // Check if template exists (handle null serviceId manually)
+  const existing = await prisma.scheduleTemplate.findFirst({
+    where: {
+      providerId,
+      serviceId: null,
+      dayOfWeek,
+      effectiveFrom: new Date('2024-01-01'),
+    },
+  });
+
+  if (existing) {
+    await prisma.scheduleTemplate.update({
+      where: { id: existing.id },
+      data: { startTime, endTime, slotDurationMins },
+    });
+  } else {
+    await prisma.scheduleTemplate.create({
+      data: {
+        providerId,
+        dayOfWeek,
+        startTime,
+        endTime,
+        slotDurationMins,
+        source: ScheduleSource.local,
+        effectiveFrom: new Date('2024-01-01'),
+      },
+    });
+  }
+}
+
+async function seedScheduleTemplates(
+  providers: { id: string; name: string; mrsId: string }[]
+) {
+  console.log('\nSeeding schedule templates...');
+
+  const drSmith = providers.find(p => p.mrsId === 'test-provider-001');
+  const drJones = providers.find(p => p.mrsId === 'test-provider-002');
+
+  if (!drSmith || !drJones) {
+    console.log('  ⚠ Providers not found, skipping schedule templates');
+    return;
+  }
+
+  // Dr. Smith: M/W/F 9am-5pm
+  for (const schedule of drSmithSchedule) {
+    await upsertScheduleTemplate(
+      drSmith.id,
+      schedule.dayOfWeek,
+      schedule.startTime,
+      schedule.endTime,
+      30
+    );
+  }
+  console.log(`  ✓ Dr. Smith: M/W/F 9am-5pm (30-min slots)`);
+
+  // Dr. Jones: T/Th 8am-3pm
+  for (const schedule of drJonesSchedule) {
+    await upsertScheduleTemplate(
+      drJones.id,
+      schedule.dayOfWeek,
+      schedule.startTime,
+      schedule.endTime,
+      30
+    );
+  }
+  console.log(`  ✓ Dr. Jones: T/Th 8am-3pm (30-min slots)`);
+}
+
+async function seedPatients() {
+  console.log('\nSeeding patients...');
 
   for (const patient of testPatients) {
     const { phones, ...patientData } = patient;
@@ -151,12 +336,57 @@ async function main() {
       console.log(`    - No phone numbers (for name+DOB fallback testing)`);
     }
   }
+}
 
-  console.log(`\nSeeded ${testPatients.length} test patients.`);
+async function backfillPatientSyncStatus() {
+  console.log('\nBackfilling patient sync status...');
+
+  // Patients with non-local mrsId are considered already synced from MRS
+  // Local patients have mrsId starting with 'local-'
+  const result = await prisma.patient.updateMany({
+    where: {
+      mrsId: { not: { startsWith: 'local-' } },
+      syncedToMrs: false,
+    },
+    data: {
+      syncedToMrs: true,
+      syncedToMrsAt: new Date(),
+    },
+  });
+
+  console.log(`  ✓ Marked ${result.count} MRS-synced patients as syncedToMrs=true`);
+}
+
+async function main() {
+  console.log('='.repeat(50));
+  console.log('Seeding database with test data...');
+  console.log('='.repeat(50));
+
+  // Seed in order: providers, services, schedule templates, patients
+  const providers = await seedProviders();
+  await seedServices();
+  await seedScheduleTemplates(providers);
+  await seedPatients();
+
+  // Backfill sync status for patients that came from MRS
+  await backfillPatientSyncStatus();
+
+  console.log('\n' + '='.repeat(50));
+  console.log('Seed complete!');
+  console.log('='.repeat(50));
+
   console.log('\nTest data summary:');
-  console.log('  - DOB range: 1955-2001 (46 years span)');
-  console.log('  - Patients with multiple phones: 2 (Michael Chen, Robert Martinez)');
-  console.log('  - Patients without phones: 2 (Amanda Foster, David Kim)');
+  console.log('  Providers:');
+  console.log('    - Dr. Smith: M/W/F 9am-5pm');
+  console.log('    - Dr. Jones: T/Th 8am-3pm');
+  console.log('  Services:');
+  console.log('    - General Checkup (30 min)');
+  console.log('    - Follow-up Visit (15 min)');
+  console.log('    - New Patient Consultation (60 min)');
+  console.log('  Patients:');
+  console.log(`    - ${testPatients.length} test patients`);
+  console.log('    - DOB range: 1955-2001');
+  console.log('    - 2 with multiple phones, 2 without phones');
 }
 
 main()

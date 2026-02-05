@@ -1,8 +1,12 @@
-import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { SyncService } from './sync/index.js';
-import { OpenMRSAdapter } from './mrs/openmrs/adapter.js';
-import { handleToolCall, VapiToolCallRequest, VapiToolCallResponse } from './agent/tools/index.js';
+import { OpenMRSAdapter } from './mrs/adapters/openmrs/adapter.js';
+import { handleToolCall, setMRSAdapter, VapiToolCallRequest, VapiToolCallResponse } from './agent/tools/index.js';
+import { loadEnv } from './utils/env.js';
+
+// Load environment with profile support
+const { profile } = loadEnv();
+console.log(`[Server] Profile: ${profile}`);
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -32,29 +36,48 @@ app.post('/vapi/tools', async (req: Request, res: Response) => {
   res.json(response);
 });
 
-// Start sync service if OpenMRS is configured
-function startSyncService(): SyncService | null {
+// Initialize MRS adapter for sync and booking
+function initializeMRSAdapter(): OpenMRSAdapter | null {
   try {
     const adapter = OpenMRSAdapter.fromEnv();
+    // Share adapter with booking tools
+    setMRSAdapter(adapter);
+    console.log('[Server] MRS adapter initialized for booking');
+    return adapter;
+  } catch (error) {
+    console.warn('[Server] MRS adapter not initialized:', (error as Error).message);
+    console.warn('[Server] Booking will work in local-only mode (queued for sync)');
+    setMRSAdapter(null);
+    return null;
+  }
+}
+
+// Start sync service if OpenMRS is configured
+function startSyncService(adapter: OpenMRSAdapter | null): SyncService | null {
+  if (!adapter) return null;
+
+  try {
     const syncService = SyncService.fromEnv(adapter);
     syncService.start();
     return syncService;
   } catch (error) {
     console.warn('[Server] Sync service not started:', (error as Error).message);
-    console.warn('[Server] Set OPENMRS_URL, OPENMRS_USER, OPENMRS_PASSWORD to enable MRS sync');
     return null;
   }
 }
 
 // Start server
+// Initialize MRS adapter and sync service
+const mrsAdapter = initializeMRSAdapter();
+const syncService = startSyncService(mrsAdapter);
+
 const server = app.listen(PORT, () => {
   console.log(`[Server] Elise Clone server running on port ${PORT}`);
   console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`[Server] Health check: http://localhost:${PORT}/health`);
   console.log(`[Server] VAPI tools: POST http://localhost:${PORT}/vapi/tools`);
+  console.log(`[Server] MRS integration: ${mrsAdapter ? 'enabled' : 'disabled (local-only mode)'}`);
 });
-
-const syncService = startSyncService();
 
 // Graceful shutdown
 function shutdown() {

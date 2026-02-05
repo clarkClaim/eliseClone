@@ -1,0 +1,38 @@
+{
+  "type": "function",
+  "messages": [
+    {
+      "type": "request-start",
+      "content": ""
+    },
+    {
+      "type": "request-failed",
+      "content": "I wasn't able to complete the registration. Let's try again."
+    }
+  ],
+  "function": {
+    "name": "save_new_patient",
+    "description": "Register a new patient in the system. By default uses the caller's phone number, but if the patient provides a different phone number (e.g., they're calling from someone else's phone), use the phone parameter.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The patient's full name"
+        },
+        "dob": {
+          "type": "string",
+          "description": "The patient's date of birth"
+        },
+        "phone": {
+          "type": "string",
+          "description": "The patient's phone number, if different from caller ID. Only include if patient explicitly provides a different number."
+        }
+      },
+      "required": ["name", "dob"]
+    }
+  },
+  "server": {
+    "url": "{{SERVER_URL}}/vapi/tools"
+  }
+}

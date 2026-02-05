@@ -3,3 +3,4 @@ export type { MRSAdapter } from './adapter.js';
 export * from './types.js';
 export * from './errors.js';
 export { OpenMRSAdapter } from './adapters/openmrs/index.js';
+export { OpenEMRAdapter } from './adapters/openemr/index.js';

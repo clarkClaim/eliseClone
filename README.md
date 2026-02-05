@@ -357,23 +357,36 @@ cd elise-clone
 # Copy environment template
 cp .env.example .env
 
-# Fill in your API keys
-# - VAPI_API_KEY
-# - VAPI_ASSISTANT_ID (created in VAPI dashboard)
-# - OPENMRS credentials (demo defaults provided)
+# Edit .env:
+# - Set PROFILE=mrs (or emr for OpenEMR)
+# - Add VAPI_API_KEY and VAPI_ASSISTANT_ID
 
-# Start PostgreSQL
-docker compose up -d postgres
+# Start PostgreSQL (profile-aware)
+docker compose up -d
 
 # Install dependencies
-npm install
+pnpm install
 
 # Run database migrations
-npm run db:migrate
+pnpm run db:migrate
+
+# Seed test data
+pnpm run db:seed
 
 # Start the development server
-npm run dev
+pnpm run dev
 ```
+
+### Profile System
+
+Elise uses a profile system to support multiple MRS backends. Set `PROFILE` in your `.env`:
+
+| Profile | MRS | Server Port | DB Port |
+|---------|-----|-------------|---------|
+| `mrs` | OpenMRS | 3000 | 5432 |
+| `emr` | OpenEMR | 3001 | 5433 |
+
+Profile-specific configs are in `config/profiles/`. For running multiple offices simultaneously, see [Multi-Office Setup](docs/MULTI_OFFICE_SETUP.md).
 
 ### Verify It's Working
 
@@ -433,10 +446,13 @@ docker compose -f docker-compose.prod.yml up -d
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `PROFILE` | Yes | MRS profile: `mrs` (OpenMRS) or `emr` (OpenEMR) |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `VAPI_API_KEY` | Yes | VAPI API key for voice |
 | `VAPI_ASSISTANT_ID` | Yes | VAPI assistant ID (configure in dashboard) |
-| `PORT` | No | Server port (default: 3000) |
+| `PORT` | No | Server port (loaded from profile config) |
+
+Profile-specific settings (PORT, DB_PORT, MRS URLs, NGROK_DOMAIN) are loaded from `config/profiles/${PROFILE}.env`.
 
 ### MRS Integration
 

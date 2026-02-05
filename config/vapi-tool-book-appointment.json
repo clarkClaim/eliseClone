@@ -1,0 +1,42 @@
+{
+  "type": "function",
+  "messages": [
+    {
+      "type": "request-start",
+      "content": "Let me book that for you..."
+    },
+    {
+      "type": "request-failed",
+      "content": "I'm having trouble completing the booking. Could you try again?"
+    }
+  ],
+  "function": {
+    "name": "book_appointment",
+    "description": "Book an appointment for the identified patient at a specific date and time. Only call this after the patient has been identified and has confirmed the date and time they want.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "The date for the appointment (e.g., 'tomorrow', 'Monday', 'March 5th')"
+        },
+        "time": {
+          "type": "string",
+          "description": "The time for the appointment (e.g., '10am', '2:30 PM', '10 o'clock')"
+        },
+        "serviceType": {
+          "type": "string",
+          "description": "Optional: type of appointment (e.g., 'checkup', 'follow-up', 'new patient'). Defaults to general checkup."
+        },
+        "providerName": {
+          "type": "string",
+          "description": "Optional: specific provider the patient wants to see (e.g., 'Dr. Smith')"
+        }
+      },
+      "required": ["date", "time"]
+    }
+  },
+  "server": {
+    "url": "{{SERVER_URL}}/vapi/tools"
+  }
+}

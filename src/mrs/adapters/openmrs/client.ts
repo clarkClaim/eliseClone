@@ -81,6 +81,69 @@ export class OpenMRSClient {
     await this.request<void>('DELETE', path);
   }
 
+  // ============================================
+  // Bahmni Appointments API Methods
+  // ============================================
+
+  /**
+   * Get all appointment services (Bahmni).
+   * Returns array of appointment services or null if module not available.
+   */
+  async getAppointmentServices<T>(): Promise<T | null> {
+    return this.get<T>('/appointmentService/all/full');
+  }
+
+  /**
+   * Search appointments with filters (Bahmni).
+   * POST body can include: patientUuid, serviceUuid, startDate, endDate, providerUuid, locationUuid, status
+   */
+  async searchAppointments<T>(filter: {
+    patientUuid?: string;
+    serviceUuid?: string;
+    startDate?: string;
+    endDate?: string;
+    providerUuid?: string;
+    locationUuid?: string;
+    status?: string;
+  }): Promise<T | null> {
+    return this.post<T>('/appointment/search', filter);
+  }
+
+  /**
+   * Create an appointment (Bahmni).
+   */
+  async createBahmniAppointment<T>(appointment: {
+    patientUuid: string;
+    serviceUuid: string;
+    startDateTime: string;
+    endDateTime: string;
+    appointmentKind: string;
+    locationUuid?: string;
+    providers?: Array<{ uuid: string }>;
+    comments?: string;
+  }): Promise<T> {
+    return this.post<T>('/appointment', appointment);
+  }
+
+  /**
+   * Get appointment by UUID (Bahmni).
+   */
+  async getAppointmentByUuid<T>(uuid: string): Promise<T | null> {
+    return this.get<T>(`/appointment?uuid=${uuid}`);
+  }
+
+  /**
+   * Update an appointment (Bahmni).
+   * Used for status changes, cancellation, etc.
+   */
+  async updateBahmniAppointment<T>(uuid: string, updates: {
+    status?: string;
+    comments?: string;
+  }): Promise<T> {
+    // Bahmni requires sending the full appointment with uuid for updates
+    return this.post<T>('/appointment', { uuid, ...updates });
+  }
+
   /**
    * Validate connection by fetching session info.
    * @throws AuthenticationError if credentials are invalid
@@ -88,6 +151,30 @@ export class OpenMRSClient {
   async validateConnection(): Promise<boolean> {
     const response = await this.get<{ authenticated: boolean }>('/session');
     return response?.authenticated ?? false;
+  }
+
+  // ============================================
+  // Patient API Methods
+  // ============================================
+
+  /**
+   * Create a new patient in OpenMRS.
+   * POST /patient with nested person object.
+   */
+  async createPatient<T>(payload: {
+    person: {
+      names: Array<{ givenName: string; familyName: string; preferred: boolean }>;
+      gender?: string;
+      birthdate: string;
+      attributes?: Array<{ attributeType: string; value: string }>;
+    };
+    identifiers: Array<{
+      identifier: string;
+      identifierType: string;
+      location: string;
+    }>;
+  }): Promise<T> {
+    return this.post<T>('/patient', payload);
   }
 
   private async request<T>(method: string, path: string, body?: unknown, useFhir = false): Promise<T> {

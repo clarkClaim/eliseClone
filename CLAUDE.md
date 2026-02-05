@@ -8,9 +8,20 @@ AI-powered healthcare scheduling assistant. See `README.md` for full architectur
 
 The database schema, project structure, and local development environment are fully implemented. All models (Patient, Provider, Appointment, Availability, Waitlist, Job queue, etc.) are in place with PostgreSQL + Prisma.
 
-**Next: Phase 2 - MRS Integration**
+**Phase 2: MRS Integration** - In Progress
 
-Build the Sync Service that connects to OpenMRS. Key considerations documented in `docs/PHASE2_SYNC_CONSIDERATIONS.md`.
+Sync Service connecting to OpenMRS. Key considerations documented in `docs/PHASE2_SYNC_CONSIDERATIONS.md`.
+
+**Phase 3: Agent Patient ID** - In Progress (43/44 tasks)
+
+VAPI voice integration for patient identification:
+- Express server with VAPI webhook endpoints (`/vapi/tools`)
+- `identify_patient` tool - lookup by phone (caller ID) + DOB, fallback to name
+- `save_new_patient` tool - register new patients
+- Seed data with 8 test patients
+- VAPI assistant config tracked in git (`config/vapi-assistant.json`)
+
+See `openspec/changes/agent-patient-id/` for full specs and tasks.
 
 ## OpenSpec Workflow
 
@@ -56,6 +67,8 @@ Located in `openspec/specs/`:
 | `docs/TECHNICAL_EXPLORATION.md` | Design decisions, trade-offs, research |
 | `docs/DESIGN_DECISIONS.md` | Architectural choices and rationale |
 | `docs/PHASE2_SYNC_CONSIDERATIONS.md` | Schema additions needed for MRS sync |
+| `docs/VAPI_SETUP.md` | Step-by-step VAPI configuration guide |
+| `docs/VOICE_IDEAS.md` | Voice provider options and recommendations |
 
 ## Tech Stack
 

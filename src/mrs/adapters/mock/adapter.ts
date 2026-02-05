@@ -14,11 +14,14 @@ import type {
   PatientQuery,
   AppointmentFilter,
   DateRange,
-  NewAppointment,
+  CreateAppointmentRequest,
+  NewPatient,
+  ConflictCheckRequest,
+  ConflictCheckResult,
   SlotVerificationResult,
   HealthCheckResult,
 } from '../../types.js';
-import { SlotConflictError, SlotNotFoundError, NotFoundError, MRSUnavailableError } from '../../errors.js';
+import { SlotNotFoundError, NotFoundError, MRSUnavailableError, MRSValidationError } from '../../errors.js';
 
 export interface MockAdapterConfig {
   healthy?: boolean;
@@ -44,6 +47,12 @@ export class MockMRSAdapter implements MRSAdapter {
       canQueryByDateRange: true,
       canQueryByPatient: true,
       supportsStatuses: ['SCHEDULED', 'CANCELLED', 'COMPLETED'],
+    },
+    scheduling: {
+      model: 'appointment_based',
+      supportsScheduleConfig: false,
+      defaultSlotDuration: 30,
+      requiresServiceId: true,
     },
     sync: {
       supportsIncrementalSync: false,
@@ -170,6 +179,29 @@ export class MockMRSAdapter implements MRSAdapter {
     return Array.from(this.patients.values()).slice(0, options?.limit ?? 100);
   }
 
+  async createPatient(patient: NewPatient): Promise<MRSPatient> {
+    await this.simulateLatency();
+    this.maybeThrowError();
+
+    // Generate mock MRS ID
+    const mrsId = `mock-patient-${Date.now()}`;
+
+    const mrsPatient: MRSPatient = {
+      mrsId,
+      name: `${patient.givenName} ${patient.familyName}`,
+      givenName: patient.givenName,
+      familyName: patient.familyName,
+      dateOfBirth: patient.dateOfBirth,
+      gender: patient.gender,
+      phoneNumbers: patient.phone
+        ? [{ phone: patient.phone, phoneType: patient.phoneType ?? 'mobile', isPrimary: true }]
+        : [],
+    };
+
+    this.patients.set(mrsId, mrsPatient);
+    return mrsPatient;
+  }
+
   async getProvider(mrsId: string): Promise<MRSProvider | null> {
     await this.simulateLatency();
     this.maybeThrowError();
@@ -230,6 +262,46 @@ export class MockMRSAdapter implements MRSAdapter {
     };
   }
 
+  async checkConflicts(request: ConflictCheckRequest): Promise<ConflictCheckResult> {
+    await this.simulateLatency();
+    this.maybeThrowError();
+
+    const conflicting = Array.from(this.appointments.values()).filter(apt => {
+      // Skip excluded appointment (for reschedule)
+      if (request.excludeAppointmentId && apt.mrsId === request.excludeAppointmentId) {
+        return false;
+      }
+
+      // Skip cancelled/completed appointments
+      if (apt.status === 'cancelled' || apt.status === 'completed' || apt.status === 'no_show') {
+        return false;
+      }
+
+      // Check provider match if specified
+      if (request.providerId && apt.providerMrsId !== request.providerId) {
+        return false;
+      }
+
+      // Check for time overlap
+      const requestStart = request.startDateTime.getTime();
+      const requestEnd = request.endDateTime.getTime();
+      const aptStart = apt.startTime.getTime();
+      const aptEnd = apt.endTime.getTime();
+
+      return requestStart < aptEnd && requestEnd > aptStart;
+    });
+
+    if (conflicting.length > 0) {
+      return {
+        hasConflict: true,
+        conflictingAppointments: conflicting,
+        reason: `Found ${conflicting.length} conflicting appointment(s)`,
+      };
+    }
+
+    return { hasConflict: false };
+  }
+
   async getAppointments(filter: AppointmentFilter): Promise<MRSAppointment[]> {
     await this.simulateLatency();
     this.maybeThrowError();
@@ -243,28 +315,26 @@ export class MockMRSAdapter implements MRSAdapter {
     });
   }
 
-  async createAppointment(appointment: NewAppointment): Promise<MRSAppointment> {
+  async createAppointment(appointment: CreateAppointmentRequest): Promise<MRSAppointment> {
     await this.simulateLatency();
     this.maybeThrowError();
 
-    const slot = this.slots.get(appointment.slotMrsId);
-    if (!slot) {
-      throw new SlotNotFoundError(appointment.slotMrsId);
+    // Datetime-based booking
+    if (!appointment.startDateTime || !appointment.endDateTime) {
+      throw new MRSValidationError('startDateTime and endDateTime are required');
     }
-
-    if (slot.isBooked) {
-      throw new SlotConflictError(appointment.slotMrsId);
+    if (!appointment.serviceId) {
+      throw new MRSValidationError('serviceId is required');
     }
-
-    slot.isBooked = true;
 
     const mrsAppointment: MRSAppointment = {
       mrsId: `appt-${Date.now()}`,
       patientMrsId: appointment.patientMrsId,
-      providerMrsId: appointment.providerMrsId,
-      appointmentTypeMrsId: appointment.appointmentTypeMrsId,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
+      providerMrsId: appointment.providerId ?? '',
+      appointmentTypeMrsId: appointment.serviceId,
+      locationMrsId: appointment.locationId,
+      startTime: appointment.startDateTime,
+      endTime: appointment.endDateTime,
       status: 'scheduled',
       reason: appointment.reason,
     };

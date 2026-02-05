@@ -119,6 +119,43 @@ If patient books while sync is running:
 
 ---
 
+---
+
+## Patient Push (Local → MRS)
+
+Added in `patient-sync-to-mrs` change.
+
+### Schema
+
+```prisma
+model Patient {
+  syncedToMrs    Boolean   @default(false)
+  syncedToMrsAt  DateTime?
+  lastSyncError  String?
+  syncAttempts   Int       @default(0)
+}
+```
+
+### Flow
+
+1. **Real-time push** (in `save-new-patient` tool):
+   - Create patient locally with `local-{uuid}` mrsId
+   - Immediately attempt to push to MRS
+   - On success: update mrsId with MRS UUID, set `syncedToMrs=true`
+   - On failure: set `lastSyncError`, leave for background sync
+
+2. **Background push** (in sync service):
+   - Query for patients where `syncedToMrs=false AND mrsId LIKE 'local-%'`
+   - Skip patients missing required fields (givenName, familyName, dob)
+   - Push each to MRS via `adapter.createPatient()`
+   - Retry with exponential backoff on failure (max 5 attempts)
+
+### OpenMRS Configuration
+
+See `docs/OPENMRS_SETUP.md` for required environment variables.
+
+---
+
 ## Reference
 
 Full review details from project-scaffolding change review (2024-02-04).

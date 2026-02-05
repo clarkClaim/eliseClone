@@ -1,0 +1,34 @@
+{
+  "type": "function",
+  "messages": [
+    {
+      "type": "request-start",
+      "content": ""
+    },
+    {
+      "type": "request-failed",
+      "content": "I'm having trouble looking that up. Could you repeat your date of birth?"
+    }
+  ],
+  "function": {
+    "name": "identify_patient",
+    "description": "Identify a patient by their date of birth. The system automatically uses the caller's phone number.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dob": {
+          "type": "string",
+          "description": "The patient's date of birth (e.g., '03/15/1985' or 'March 15, 1985')"
+        },
+        "name": {
+          "type": "string",
+          "description": "The patient's full name (only needed if phone lookup fails)"
+        }
+      },
+      "required": ["dob"]
+    }
+  },
+  "server": {
+    "url": "{{SERVER_URL}}/vapi/tools"
+  }
+}

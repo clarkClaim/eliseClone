@@ -1,0 +1,77 @@
+{
+  "$schema": "OpenMRS O3 Demo Instance Configuration",
+  "$comment": "UUIDs for o3.openmrs.org - verified working 2026-02-05",
+
+  "identifierTypes": {
+    "openmrsId": {
+      "uuid": "05a29f94-c0ed-11e2-94be-8c13b969e334",
+      "name": "OpenMRS ID",
+      "required": true,
+      "validator": "LuhnMod30",
+      "$comment": "Elise generates valid Luhn Mod-30 identifiers automatically"
+    },
+    "idCard": {
+      "uuid": "b4143563-16cd-4439-b288-f83d61670fc8",
+      "name": "ID Card",
+      "required": false,
+      "validator": null
+    }
+  },
+
+  "personAttributeTypes": {
+    "telephoneNumber": {
+      "uuid": "14d4f066-15f5-102d-96e4-000c29c2a5d7",
+      "name": "Telephone Number"
+    }
+  },
+
+  "locations": {
+    "outpatientClinic": {
+      "uuid": "44c3efb0-2583-4c80-a79e-1f756a03c0a1",
+      "name": "Outpatient Clinic",
+      "tags": ["Queue Location", "Login Location", "Facility Location", "Appointment Location"],
+      "useCase": "Primary clinic for scheduled appointments"
+    },
+    "communityOutreach": {
+      "uuid": "1ce1b7d4-c865-4178-82b0-5932e51503d6",
+      "name": "Community Outreach",
+      "tags": ["Visit Location", "Login Location"],
+      "useCase": "Mobile/community health programs"
+    },
+    "inpatientWard": {
+      "uuid": "ba685651-ed3b-4e63-9b35-78893060758a",
+      "name": "Inpatient Ward",
+      "tags": ["Login Location", "Transfer Location", "Admission Location"],
+      "useCase": "Hospital admissions"
+    }
+  },
+
+  "idgenSources": {
+    "openmrsIdGenerator": {
+      "uuid": "8549f706-7e85-4c1d-9424-217d50a2988b",
+      "name": "Generator for OpenMRS ID",
+      "$comment": "Not used - Elise generates IDs client-side with Luhn Mod-30"
+    }
+  },
+
+  "defaults": {
+    "$comment": "Single-location defaults - used until multi-location config is implemented",
+    "identifierTypeUuid": "05a29f94-c0ed-11e2-94be-8c13b969e334",
+    "identifierLocationUuid": "44c3efb0-2583-4c80-a79e-1f756a03c0a1",
+    "phoneAttributeUuid": "14d4f066-15f5-102d-96e4-000c29c2a5d7"
+  },
+
+  "requirements": {
+    "$comment": "O3 demo instance requirements for patient creation",
+    "gender": {
+      "required": true,
+      "validValues": ["M", "F", "O"],
+      "$comment": "Elise maps male->M, female->F, other->O"
+    },
+    "identifier": {
+      "required": true,
+      "format": "Luhn Mod-30 (7 chars)",
+      "$comment": "Elise auto-generates valid identifiers"
+    }
+  }
+}

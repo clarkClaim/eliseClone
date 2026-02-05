@@ -8,11 +8,19 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "tunnel": "./scripts/ngrok.sh",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
-    "setup:vapi": "tsx scripts/setup-vapi.ts"
+    "vapi:setup": "tsx scripts/vapi-setup.ts",
+    "vapi:list": "tsx scripts/vapi-list.ts",
+    "vapi:assign": "tsx scripts/vapi-assign.ts",
+    "vapi:delete": "tsx scripts/vapi-delete.ts",
+    "vapi:logs": "tsx scripts/vapi-logs.ts",
+    "setup:availability": "tsx scripts/setup-availability.ts",
+    "test:openemr": "tsx scripts/test-openemr.ts",
+    "test:openmrs": "tsx test/openmrs-integration.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -30,6 +38,7 @@
   "devDependencies": {
     "@types/node": "^25.2.0",
     "@types/pg": "^8.16.0",
+    "@types/uuid": "^11.0.0",
     "dotenv": "^17.2.3",
     "prisma": "^7.3.0",
     "tsx": "^4.21.0",
@@ -40,6 +49,7 @@
     "@prisma/client": "^7.3.0",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
-    "pg": "^8.18.0"
+    "pg": "^8.18.0",
+    "uuid": "^13.0.0"
   }
 }

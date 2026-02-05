@@ -10,10 +10,15 @@ import type {
   MRSAppointmentType,
   MRSAppointment,
   MRSSlot,
+  MRSScheduleConfig,
   PatientQuery,
   AppointmentFilter,
   DateRange,
+  CreateAppointmentRequest,
   NewAppointment,
+  NewPatient,
+  ConflictCheckRequest,
+  ConflictCheckResult,
   SlotVerificationResult,
   HealthCheckResult,
 } from './types.js';
@@ -95,6 +100,14 @@ export interface MRSAdapter {
    */
   getPatients(options?: { since?: Date; limit?: number }): Promise<MRSPatient[]>;
 
+  /**
+   * Create a new patient in the MRS.
+   * @param patient - The patient data to create
+   * @returns The created patient with MRS ID populated
+   * @throws MRSValidationError if patient data is invalid
+   */
+  createPatient(patient: NewPatient): Promise<MRSPatient>;
+
   // ============================================
   // Provider Operations
   // ============================================
@@ -133,13 +146,39 @@ export interface MRSAdapter {
   getAppointmentTypes(): Promise<MRSAppointmentType[]>;
 
   // ============================================
-  // Availability Operations
+  // Schedule Configuration
+  // ============================================
+
+  /**
+   * Get schedule/service configuration from the MRS.
+   * Returns service hours and availability patterns.
+   * @returns Array of schedule configurations, or undefined if not supported
+   */
+  getScheduleConfig?(): Promise<MRSScheduleConfig[]>;
+
+  // ============================================
+  // Conflict Detection
+  // ============================================
+
+  /**
+   * Check for scheduling conflicts at a given time.
+   * Use this instead of verifySlotAvailable() for datetime-based booking.
+   * @param request - The conflict check parameters
+   * @returns Conflict check result with any conflicting appointments
+   */
+  checkConflicts(request: ConflictCheckRequest): Promise<ConflictCheckResult>;
+
+  // ============================================
+  // Availability Operations (Deprecated)
   // ============================================
 
   /**
    * Get available time slots within a date range.
    * @param range - The date range to search
    * @returns Array of time slots (both available and booked)
+   * @deprecated Slot-based availability is being replaced by datetime-based scheduling.
+   * Use getScheduleConfig() + local AvailabilityService for computing availability.
+   * This method is retained for slot-based MRS adapters only.
    */
   getAvailability(range: DateRange): Promise<MRSSlot[]>;
 
@@ -148,11 +187,13 @@ export interface MRSAdapter {
    * @param providerMrsId - The provider's MRS ID
    * @param dateRange - The date range to search
    * @returns Array of slots (both available and booked)
+   * @deprecated Slot-based availability is being replaced by datetime-based scheduling.
+   * Use checkConflicts() for validation and local AvailabilityService for availability.
    */
   getProviderAvailability(providerMrsId: string, dateRange: DateRange): Promise<MRSSlot[]>;
 
   // ============================================
-  // Real-Time Slot Validation
+  // Real-Time Slot Validation (Deprecated)
   // ============================================
 
   /**
@@ -161,6 +202,8 @@ export interface MRSAdapter {
    * @param slotId - The MRS slot ID to verify
    * @returns Verification result with availability status
    * @throws SlotNotFoundError if slot doesn't exist
+   * @deprecated Use checkConflicts() instead for datetime-based conflict detection.
+   * This method is retained for slot-based MRS adapters only.
    */
   verifySlotAvailable(slotId: string): Promise<SlotVerificationResult>;
 
@@ -176,13 +219,13 @@ export interface MRSAdapter {
   getAppointments(filter: AppointmentFilter): Promise<MRSAppointment[]>;
 
   /**
-   * Create a new appointment in the MRS.
-   * @param appointment - The appointment details
+   * Create a new appointment in the MRS using datetime-based booking.
+   * @param appointment - The appointment details with start/end times
    * @returns The created appointment with MRS ID populated
-   * @throws SlotConflictError if slot is no longer available
+   * @throws SlotConflictError if there's a scheduling conflict
    * @throws MRSValidationError if data is invalid
    */
-  createAppointment(appointment: NewAppointment): Promise<MRSAppointment>;
+  createAppointment(appointment: CreateAppointmentRequest): Promise<MRSAppointment>;
 
   /**
    * Cancel an appointment in the MRS.
@@ -201,4 +244,46 @@ export interface MRSAdapter {
    * @throws MRSValidationError if status transition is invalid
    */
   updateAppointmentStatus(mrsId: string, status: string): Promise<void>;
+}
+
+// ============================================
+// Slot-Based MRS Adapter Extension
+// ============================================
+
+/**
+ * Extended interface for slot-based MRS systems.
+ * Slot-based adapters should implement this interface in addition to MRSAdapter.
+ * Use isSlotBasedAdapter() type guard to check if an adapter supports slot operations.
+ */
+export interface SlotBasedMRSAdapter extends MRSAdapter {
+  /**
+   * Get discrete time slots within a date range.
+   * @param range - The date range to search
+   * @returns Array of discrete time slots
+   */
+  getSlots(range: DateRange): Promise<MRSSlot[]>;
+
+  /**
+   * Get a specific slot by its MRS ID.
+   * @param slotId - The slot's MRS ID
+   * @returns The slot or null if not found
+   */
+  getSlotById(slotId: string): Promise<MRSSlot | null>;
+
+  /**
+   * Book an appointment by slot ID.
+   * @param slotId - The slot's MRS ID
+   * @param patientMrsId - The patient's MRS ID
+   * @returns The created appointment
+   */
+  bookSlot(slotId: string, patientMrsId: string): Promise<MRSAppointment>;
+}
+
+/**
+ * Type guard to check if an adapter is slot-based.
+ * @param adapter - The MRS adapter to check
+ * @returns True if the adapter uses slot-based scheduling
+ */
+export function isSlotBasedAdapter(adapter: MRSAdapter): adapter is SlotBasedMRSAdapter {
+  return adapter.capabilities.scheduling.model === 'slot_based';
 }

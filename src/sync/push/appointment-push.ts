@@ -33,6 +33,7 @@ export async function pushAppointmentToMRS(
         include: {
           provider: true,
           appointmentType: true,
+          location: true,
         },
       },
     },
@@ -54,20 +55,98 @@ export async function pushAppointmentToMRS(
     };
   }
 
-  if (!appointment.slot.mrsId) {
+  // Slot is optional - check if we have direct time fields or slot
+  if (!appointment.slot) {
+    // Datetime-based booking - use direct fields
+    if (!appointment.serviceId) {
+      return {
+        success: false,
+        appointmentId,
+        error: 'Service ID not set - cannot push to Bahmni',
+      };
+    }
+
+    // Look up service mrsId
+    const service = appointment.serviceId
+      ? await prisma.appointmentType.findUnique({ where: { id: appointment.serviceId } })
+      : null;
+    const provider = appointment.providerId
+      ? await prisma.provider.findUnique({ where: { id: appointment.providerId } })
+      : null;
+
+    if (!service?.mrsId) {
+      return {
+        success: false,
+        appointmentId,
+        error: 'Service not found or has no MRS ID - cannot push to Bahmni',
+      };
+    }
+
+    try {
+      const mrsAppointment = await adapter.createAppointment({
+        patientMrsId: appointment.patient.mrsId,
+        providerId: provider?.mrsId,
+        serviceId: service.mrsId,
+        startDateTime: appointment.startTime,
+        endDateTime: appointment.endTime,
+        reason: appointment.reason ?? undefined,
+      });
+
+      await prisma.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          mrsId: mrsAppointment.mrsId,
+          syncedToMrs: true,
+          syncedToMrsAt: new Date(),
+          lastSyncError: null,
+          syncAttempts: appointment.syncAttempts + 1,
+        },
+      });
+
+      return {
+        success: true,
+        appointmentId,
+        mrsId: mrsAppointment.mrsId,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isConflict = error instanceof SlotConflictError;
+
+      await prisma.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          lastSyncError: errorMessage,
+          syncAttempts: appointment.syncAttempts + 1,
+        },
+      });
+
+      return {
+        success: false,
+        appointmentId,
+        error: errorMessage,
+        isConflict,
+      };
+    }
+  }
+
+  // Legacy slot-based booking
+  // Bahmni requires service (appointment type) for booking
+  if (!appointment.slot.appointmentType?.mrsId) {
     return {
       success: false,
       appointmentId,
-      error: 'Slot has no MRS ID - cannot push',
+      error: 'Appointment type (service) not set - cannot push to Bahmni',
     };
   }
 
   try {
     const mrsAppointment = await adapter.createAppointment({
       patientMrsId: appointment.patient.mrsId,
-      providerMrsId: appointment.slot.provider.mrsId,
-      slotMrsId: appointment.slot.mrsId,
-      appointmentTypeMrsId: appointment.slot.appointmentType?.mrsId,
+      providerId: appointment.slot.provider.mrsId,
+      serviceId: appointment.slot.appointmentType.mrsId,
+      startDateTime: appointment.slot.startTime,
+      endDateTime: appointment.slot.endTime,
+      locationId: appointment.slot.location?.mrsId,
       reason: appointment.reason ?? undefined,
     });
 
@@ -105,7 +184,7 @@ export async function pushAppointmentToMRS(
         entityId: appointmentId,
         conflictType: 'external_booking',
         localState: appointment as object,
-      }, `Push failed: slot ${appointment.slot.mrsId} was booked in MRS`);
+      }, `Push failed: slot ${appointment.slot?.mrsId ?? 'N/A'} was booked in MRS`);
     }
 
     return {
