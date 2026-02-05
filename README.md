@@ -343,39 +343,63 @@ LIMIT 1;
 ### Prerequisites
 
 - Node.js 20+
+- pnpm (`npm install -g pnpm`)
 - Docker & Docker Compose
 - VAPI account and API key
-- (Optional) Fly.io CLI for deployment
+- ngrok account (free tier works)
 
 ### Setup
 
 ```bash
-# Clone the repository
+# Clone and enter directory
 git clone <repo-url>
 cd elise-clone
 
 # Copy environment template
 cp .env.example .env
 
-# Edit .env:
-# - Set PROFILE=mrs (or emr for OpenEMR)
-# - Add VAPI_API_KEY and VAPI_ASSISTANT_ID
-
-# Start PostgreSQL (profile-aware)
-docker compose up -d
+# Edit .env - minimum required:
+#   PROFILE=mrs          (or emr for OpenEMR)
+#   VAPI_API_KEY=...     (from VAPI dashboard)
+#   NGROK_DOMAIN=...     (from ngrok dashboard, optional but recommended)
 
 # Install dependencies
 pnpm install
 
-# Run database migrations
-pnpm run db:migrate
-
-# Seed test data
-pnpm run db:seed
-
-# Start the development server
-pnpm run dev
+# Run quickstart (starts DB, runs migrations, configures VAPI)
+pnpm quickstart
 ```
+
+The quickstart script will:
+1. Start PostgreSQL (on the correct port for your profile)
+2. Generate the Prisma client
+3. Run database migrations
+4. Deploy your VAPI assistant configuration
+5. Show you how to set up ngrok for webhooks
+
+### After Quickstart
+
+Open two terminals:
+
+```bash
+# Terminal 1: Start the server
+pnpm dev
+
+# Terminal 2: Start ngrok tunnel
+pnpm tunnel
+```
+
+Then make a test call to your VAPI phone number.
+
+### Full Reset
+
+To wipe everything and start fresh:
+
+```bash
+pnpm reset
+```
+
+This destroys the database volume and re-runs the full setup.
 
 ### Profile System
 
@@ -386,7 +410,7 @@ Elise uses a profile system to support multiple MRS backends. Set `PROFILE` in y
 | `mrs` | OpenMRS | 3000 | 5432 |
 | `emr` | OpenEMR | 3001 | 5433 |
 
-Profile-specific configs are in `config/profiles/`. For running multiple offices simultaneously, see [Multi-Office Setup](docs/MULTI_OFFICE_SETUP.md).
+Profile-specific configs are in `config/profiles/`. Each profile has its own database volume, so you can run both simultaneously.
 
 ### Verify It's Working
 
@@ -394,16 +418,59 @@ Profile-specific configs are in `config/profiles/`. For running multiple offices
 # Check health endpoint
 curl http://localhost:3000/health
 
-# Expected response:
-# { "status": "ok", "database": "connected", "lastSync": "..." }
-
-# Test chat endpoint
-curl -X POST http://localhost:3000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "I need to schedule an appointment"}'
+# View VAPI call logs
+pnpm vapi:logs --last
 ```
 
-For voice testing, configure your VAPI assistant's webhook URL to point to your server (use ngrok for local development).
+For voice testing, call your VAPI phone number. The assistant will attempt to identify you and help schedule an appointment.
+
+---
+
+## Development Commands
+
+All commands are profile-aware — they read `PROFILE` from your `.env` and load the appropriate config from `config/profiles/`.
+
+### Database
+
+```bash
+pnpm db:up              # Start PostgreSQL container (profile-aware port)
+pnpm db:down            # Stop PostgreSQL container
+pnpm db:migrate         # Run Prisma migrations
+pnpm db:generate        # Regenerate Prisma client
+pnpm db:push            # Push schema changes (dev only)
+pnpm db:studio          # Open Prisma Studio (database browser)
+pnpm db:seed            # Seed test data
+pnpm db:reset           # Reset database and re-run migrations
+```
+
+### Server
+
+```bash
+pnpm dev                # Start server with hot reload
+pnpm build              # Compile TypeScript
+pnpm start              # Run compiled server
+pnpm tunnel             # Start ngrok tunnel for VAPI webhooks
+```
+
+### VAPI
+
+```bash
+pnpm vapi:setup              # Deploy assistant configs to VAPI (all offices)
+pnpm vapi:setup evergreen    # Deploy specific office only
+pnpm vapi:list               # List assistants and phone numbers
+pnpm vapi:logs               # List recent calls
+pnpm vapi:logs --last        # Show transcript of last call
+pnpm vapi:assign             # Assign phone number to assistant
+pnpm vapi:delete             # Delete an assistant
+```
+
+### Docker (Generic)
+
+```bash
+pnpm docker <command>        # Run any docker compose command (profile-aware)
+pnpm docker logs -f          # Follow container logs
+pnpm docker ps               # List running containers
+```
 
 ---
 

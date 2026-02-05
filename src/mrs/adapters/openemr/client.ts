@@ -76,7 +76,9 @@ export class OpenEMRClient {
       client_secret: this.clientSecret,
       username: this.username,
       password: this.password,
-      scope: 'openid api:oemr user/patient.crus user/appointment.cruds',
+      user_role: 'users',
+      // REST API scopes (lowercase) and FHIR API scopes (PascalCase)
+      scope: 'openid offline_access api:oemr api:fhir user/patient.read user/patient.write user/appointment.read user/appointment.write user/practitioner.read user/facility.read user/list.read user/Patient.read user/Practitioner.read user/Appointment.read user/Location.read',
     });
 
     const response = await this.fetchWithTimeout(this.tokenUrl, {
@@ -159,15 +161,16 @@ export class OpenEMRClient {
   }
 
   /**
-   * Ensure we have a valid access token, refreshing if needed.
+   * Ensure we have a valid access token, auto-authenticating or refreshing if needed.
    */
   private async ensureAuthenticated(): Promise<string> {
+    // Auto-authenticate on first request
     if (!this.tokenState) {
-      throw new AuthenticationError('Not authenticated. Call authenticate() first.');
+      await this.authenticate();
     }
 
     // Check if token is expiring soon
-    const expiresIn = this.tokenState.expiresAt.getTime() - Date.now();
+    const expiresIn = this.tokenState!.expiresAt.getTime() - Date.now();
     if (expiresIn < TOKEN_REFRESH_BUFFER_MS) {
       await this.refreshToken();
     }

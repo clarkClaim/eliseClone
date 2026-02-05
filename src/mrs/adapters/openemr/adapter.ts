@@ -79,7 +79,7 @@ export class OpenEMRAdapter implements MRSAdapter {
     const url = process.env.OPENEMR_URL;
     const clientId = process.env.OPENEMR_CLIENT_ID;
     const clientSecret = process.env.OPENEMR_CLIENT_SECRET;
-    const username = process.env.OPENEMR_USERNAME;
+    const username = process.env.OPENEMR_USER; // Consistent with OPENMRS_USER
     const password = process.env.OPENEMR_PASSWORD;
 
     if (!url || !clientId || !clientSecret || !username || !password) {
@@ -87,7 +87,7 @@ export class OpenEMRAdapter implements MRSAdapter {
       if (!url) missing.push('OPENEMR_URL');
       if (!clientId) missing.push('OPENEMR_CLIENT_ID');
       if (!clientSecret) missing.push('OPENEMR_CLIENT_SECRET');
-      if (!username) missing.push('OPENEMR_USERNAME');
+      if (!username) missing.push('OPENEMR_USER');
       if (!password) missing.push('OPENEMR_PASSWORD');
       throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
     }

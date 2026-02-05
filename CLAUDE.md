@@ -107,31 +107,66 @@ Located in `openspec/specs/`:
 | `docs/VAPI_SETUP.md` | Step-by-step VAPI configuration guide |
 | `docs/VOICE_IDEAS.md` | Voice provider options and recommendations |
 
+## Local OpenEMR Setup (EMR Profile)
+
+For EMR profile development, run a local OpenEMR instance:
+
+```bash
+# 1. Start OpenEMR (first time takes ~3-4 min, demo data loads automatically)
+cd ../openemr-local && ./start.sh
+
+# 2. Set up OAuth client (registers + enables + tests)
+cd ../ehsClone && pnpm openemr:setup
+
+# 3. Run the server
+pnpm dev
+```
+
+See `../openemr-local/README.md` for details on the Docker setup.
+
 ## Tech Stack
 
 - **Runtime:** TypeScript / Node.js
 - **Package Manager:** pnpm (use `pnpm` not `npm`)
 - **Database:** PostgreSQL + Prisma 7 (with driver adapters)
 - **Voice:** VAPI
-- **MRS:** OpenMRS (demo instance)
+- **MRS:** OpenEMR (local instance via `../openemr-local/`)
 - **Deploy:** Fly.io
 
-## Development
+## Development Commands
+
+All commands are profile-aware (read PROFILE from `.env`).
 
 ```bash
-docker compose up -d      # Start PostgreSQL
-pnpm run dev              # Start server with hot reload
-pnpm run build            # Compile TypeScript
-pnpm exec prisma studio   # Browse database
-pnpm exec prisma migrate dev  # Run migrations
-```
+# Quickstart (fresh clone)
+pnpm quickstart           # DB up, migrate, generate, VAPI setup
+pnpm reset                # Full reset (destroys data) + quickstart
 
-## VAPI Commands
+# Database
+pnpm db:up                # Start PostgreSQL (correct port for profile)
+pnpm db:down              # Stop PostgreSQL
+pnpm db:migrate           # Run Prisma migrations
+pnpm db:studio            # Browse database
+pnpm db:seed              # Seed test data
+pnpm db:reset             # Reset database
 
-```bash
-pnpm run vapi:setup       # Deploy assistant configs to VAPI (all offices)
-pnpm run vapi:setup evergreen  # Deploy specific office only
-pnpm run vapi:logs        # List recent calls
-pnpm run vapi:logs --last # Show transcript of last call
-pnpm run vapi:list        # List assistants and phone numbers
+# Server
+pnpm dev                  # Start with hot reload
+pnpm build                # Compile TypeScript
+pnpm tunnel               # Start ngrok tunnel
+
+# VAPI
+pnpm vapi:setup           # Deploy assistant configs (all offices)
+pnpm vapi:setup evergreen # Deploy specific office
+pnpm vapi:logs            # List recent calls
+pnpm vapi:logs --last     # Transcript of last call
+pnpm vapi:list            # List assistants and phone numbers
+
+# Docker (generic)
+pnpm docker <cmd>         # Any docker compose command
+
+# OpenEMR (EMR profile)
+pnpm openemr:setup        # Register + enable OAuth client (local dev)
+pnpm openemr:register     # Register OAuth client only (any instance)
+pnpm test:openemr:adapter # Test OpenEMR adapter
 ```

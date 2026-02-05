@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import { SyncService } from './sync/index.js';
 import { OpenMRSAdapter } from './mrs/adapters/openmrs/adapter.js';
+import { OpenEMRAdapter } from './mrs/adapters/openemr/adapter.js';
+import type { MRSAdapter } from './mrs/adapter.js';
 import { handleToolCall, setMRSAdapter, VapiToolCallRequest, VapiToolCallResponse } from './agent/tools/index.js';
 import { loadEnv } from './utils/env.js';
 
@@ -36,13 +38,23 @@ app.post('/vapi/tools', async (req: Request, res: Response) => {
   res.json(response);
 });
 
-// Initialize MRS adapter for sync and booking
-function initializeMRSAdapter(): OpenMRSAdapter | null {
+// Initialize MRS adapter for sync and booking based on profile
+function initializeMRSAdapter(): MRSAdapter | null {
   try {
-    const adapter = OpenMRSAdapter.fromEnv();
+    let adapter: MRSAdapter;
+
+    if (profile === 'emr') {
+      adapter = OpenEMRAdapter.fromEnv();
+      console.log('[Server] OpenEMR adapter initialized');
+    } else {
+      // Default to OpenMRS (profile === 'mrs' or any other)
+      adapter = OpenMRSAdapter.fromEnv();
+      console.log('[Server] OpenMRS adapter initialized');
+    }
+
     // Share adapter with booking tools
     setMRSAdapter(adapter);
-    console.log('[Server] MRS adapter initialized for booking');
+    console.log('[Server] MRS adapter ready for booking');
     return adapter;
   } catch (error) {
     console.warn('[Server] MRS adapter not initialized:', (error as Error).message);
@@ -52,8 +64,8 @@ function initializeMRSAdapter(): OpenMRSAdapter | null {
   }
 }
 
-// Start sync service if OpenMRS is configured
-function startSyncService(adapter: OpenMRSAdapter | null): SyncService | null {
+// Start sync service if MRS adapter is configured
+function startSyncService(adapter: MRSAdapter | null): SyncService | null {
   if (!adapter) return null;
 
   try {
