@@ -10,6 +10,11 @@ import type { PushJobPayload } from '../types.js';
 const BASE_BACKOFF_MS = 60000; // 1 minute
 const MAX_ATTEMPTS = 5;
 
+/** Extended payload with idempotency key for push jobs */
+interface ExtendedPushJobPayload extends PushJobPayload {
+  idempotencyKey?: string;
+}
+
 export interface PushResult {
   success: boolean;
   appointmentId: string;
@@ -20,10 +25,16 @@ export interface PushResult {
 
 /**
  * Push a local appointment to MRS.
+ * @param adapter - The MRS adapter to use
+ * @param appointmentId - The local appointment ID to push
+ * @param idempotencyKey - Optional idempotency key for duplicate detection
+ * @param jobId - Optional job ID to update atomically with appointment on success
  */
 export async function pushAppointmentToMRS(
   adapter: MRSAdapter,
-  appointmentId: string
+  appointmentId: string,
+  idempotencyKey?: string,
+  jobId?: string
 ): Promise<PushResult> {
   const appointment = await prisma.appointment.findUnique({
     where: { id: appointmentId },
@@ -83,25 +94,57 @@ export async function pushAppointmentToMRS(
     }
 
     try {
+      if (!appointment.patient.mrsId) {
+        return {
+          success: false,
+          appointmentId,
+          error: 'Patient not synced to MRS - cannot push',
+        };
+      }
+
       const mrsAppointment = await adapter.createAppointment({
         patientMrsId: appointment.patient.mrsId,
-        providerId: provider?.mrsId,
+        providerId: provider?.mrsId ?? undefined,
         serviceId: service.mrsId,
         startDateTime: appointment.startTime,
         endDateTime: appointment.endTime,
         reason: appointment.reason ?? undefined,
+        idempotencyKey,
       });
 
-      await prisma.appointment.update({
-        where: { id: appointmentId },
-        data: {
-          mrsId: mrsAppointment.mrsId,
-          syncedToMrs: true,
-          syncedToMrsAt: new Date(),
-          lastSyncError: null,
-          syncAttempts: appointment.syncAttempts + 1,
-        },
-      });
+      // Update appointment and job in a transaction for consistency
+      if (jobId) {
+        await prisma.$transaction([
+          prisma.appointment.update({
+            where: { id: appointmentId },
+            data: {
+              mrsId: mrsAppointment.mrsId,
+              syncedToMrs: true,
+              syncedToMrsAt: new Date(),
+              lastSyncError: null,
+              syncAttempts: appointment.syncAttempts + 1,
+            },
+          }),
+          prisma.job.update({
+            where: { id: jobId },
+            data: {
+              status: 'completed',
+              completedAt: new Date(),
+            },
+          }),
+        ]);
+      } else {
+        await prisma.appointment.update({
+          where: { id: appointmentId },
+          data: {
+            mrsId: mrsAppointment.mrsId,
+            syncedToMrs: true,
+            syncedToMrsAt: new Date(),
+            lastSyncError: null,
+            syncAttempts: appointment.syncAttempts + 1,
+          },
+        });
+      }
 
       return {
         success: true,
@@ -140,14 +183,23 @@ export async function pushAppointmentToMRS(
   }
 
   try {
+    if (!appointment.patient.mrsId) {
+      return {
+        success: false,
+        appointmentId,
+        error: 'Patient not synced to MRS - cannot push',
+      };
+    }
+
     const mrsAppointment = await adapter.createAppointment({
       patientMrsId: appointment.patient.mrsId,
-      providerId: appointment.slot.provider.mrsId,
+      providerId: appointment.slot.provider.mrsId ?? undefined,
       serviceId: appointment.slot.appointmentType.mrsId,
       startDateTime: appointment.slot.startTime,
       endDateTime: appointment.slot.endTime,
-      locationId: appointment.slot.location?.mrsId,
+      locationId: appointment.slot.location?.mrsId ?? undefined,
       reason: appointment.reason ?? undefined,
+      idempotencyKey,
     });
 
     await prisma.appointment.update({
@@ -197,12 +249,25 @@ export async function pushAppointmentToMRS(
 }
 
 /**
+ * Generate an idempotency key for an appointment push.
+ * Format: push_appt_{appointmentId}_{timestamp}
+ * This ensures that retries of the same job don't create duplicates,
+ * but a new push job for the same appointment can be created.
+ */
+export function generateIdempotencyKey(appointmentId: string): string {
+  return `push_appt_${appointmentId}_${Date.now()}`;
+}
+
+/**
  * Create a push job for an appointment.
+ * Includes an idempotency key to prevent duplicate appointments on retry.
  */
 export async function createPushJob(
   appointmentId: string,
   options?: { priority?: number; runAt?: Date }
 ): Promise<string> {
+  const idempotencyKey = generateIdempotencyKey(appointmentId);
+
   const job = await prisma.job.create({
     data: {
       type: 'push_appointment_to_mrs',
@@ -210,6 +275,7 @@ export async function createPushJob(
       priority: options?.priority ?? 10, // High priority
       runAt: options?.runAt ?? new Date(),
       maxAttempts: MAX_ATTEMPTS,
+      idempotencyKey,
     },
   });
 
@@ -245,17 +311,18 @@ export async function processPushJobs(adapter: MRSAdapter, limit = 10): Promise<
       },
     });
 
-    const payload = job.payload as unknown as PushJobPayload;
-    const result = await pushAppointmentToMRS(adapter, payload.appointmentId);
+    const payload = job.payload as unknown as ExtendedPushJobPayload;
+    // Pass the idempotency key and job ID for transactional update on success
+    const result = await pushAppointmentToMRS(
+      adapter,
+      payload.appointmentId,
+      job.idempotencyKey ?? undefined,
+      job.id // Job ID for transactional update
+    );
 
+    // On success, the job was already updated in the transaction within pushAppointmentToMRS
     if (result.success) {
-      await prisma.job.update({
-        where: { id: job.id },
-        data: {
-          status: 'completed',
-          completedAt: new Date(),
-        },
-      });
+      // Job already marked as completed in transaction
     } else if (result.isConflict || job.attempts + 1 >= job.maxAttempts) {
       await prisma.job.update({
         where: { id: job.id },

@@ -135,25 +135,25 @@ export interface SyncResult {
   error?: string;
 }
 
-export interface ChangeRecord<T> {
-  local: T;
-  mrs: T;
+export interface ChangeRecord<TMrs, TLocal = TMrs> {
+  local: TLocal;
+  mrs: TMrs;
 }
 
-export interface ChangeSet<T> {
-  created: T[];
-  updated: ChangeRecord<T>[];
-  deleted: T[];
-  conflicts: ConflictRecord<T>[];
+export interface ChangeSet<TMrs, TLocal = TMrs> {
+  created: TMrs[];
+  updated: ChangeRecord<TMrs, TLocal>[];
+  deleted: TLocal[];
+  conflicts: ConflictRecord<TMrs, TLocal>[];
 }
 
-export interface ConflictRecord<T> {
+export interface ConflictRecord<TMrs, TLocal = TMrs> {
   entityType: EntityType;
   entityId: string;
   mrsId?: string;
   conflictType: ConflictType;
-  localState: T;
-  mrsState?: T;
+  localState: TLocal;
+  mrsState?: TMrs;
 }
 
 /**

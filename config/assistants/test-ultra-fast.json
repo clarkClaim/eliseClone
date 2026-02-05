@@ -1,0 +1,23 @@
+{
+  "_comment": "Test: Ultra-fast - Groq Maverick + Deepgram Luna + minimal delays",
+  "profile": "mrs",
+  "template": {
+    "ASSISTANT_NAME": "Elise - Test Ultra Fast",
+    "OFFICE_NAME": "Maple Grove Medical",
+    "OFFICE_INFO": "Primary care clinic open Monday-Friday 8am-5pm",
+    "FIRST_MESSAGE": "Hi, Elise from Maple Grove. Date of birth?",
+    "STYLE_TONE": "Direct and efficient"
+  },
+  "overrides": {
+    "voice": {
+      "provider": "deepgram",
+      "voiceId": "luna"
+    },
+    "model": {
+      "provider": "groq",
+      "model": "meta-llama/llama-4-maverick-17b-128e-instruct"
+    },
+    "responseDelaySeconds": 0.2,
+    "llmRequestDelaySeconds": 0.1
+  }
+}

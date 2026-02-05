@@ -7,22 +7,25 @@ export interface Identifiable {
   mrsId?: string | null;
 }
 
-export interface ChangeDetectionOptions<T> {
+export interface ChangeDetectionOptions<TMrs, TLocal = TMrs> {
   entityType: EntityType;
-  mrsData: T[];
-  localData: T[];
-  getMrsId: (record: T) => string;
-  getLocalMrsId: (record: T) => string | null | undefined;
-  getLocalId: (record: T) => string;
-  hasChanged: (local: T, mrs: T) => boolean;
-  isConflict?: (local: T, mrs: T) => boolean;
+  mrsData: TMrs[];
+  localData: TLocal[];
+  getMrsId: (record: TMrs) => string;
+  getLocalMrsId: (record: TLocal) => string | null | undefined;
+  getLocalId: (record: TLocal) => string;
+  hasChanged: (local: TLocal, mrs: TMrs) => boolean;
+  isConflict?: (local: TLocal, mrs: TMrs) => boolean;
 }
 
 /**
  * Detect changes between MRS data and local data.
  * This is used when the MRS doesn't support incremental sync (modified-since queries).
+ *
+ * @typeParam TMrs - Type of records from the MRS
+ * @typeParam TLocal - Type of records from local database (defaults to TMrs)
  */
-export function detectChanges<T>(options: ChangeDetectionOptions<T>): ChangeSet<T> {
+export function detectChanges<TMrs, TLocal = TMrs>(options: ChangeDetectionOptions<TMrs, TLocal>): ChangeSet<TMrs, TLocal> {
   const {
     entityType,
     mrsData,
@@ -34,14 +37,14 @@ export function detectChanges<T>(options: ChangeDetectionOptions<T>): ChangeSet<
     isConflict,
   } = options;
 
-  const changes: ChangeSet<T> = {
+  const changes: ChangeSet<TMrs, TLocal> = {
     created: [],
     updated: [],
     deleted: [],
     conflicts: [],
   };
 
-  const localByMrsId = new Map<string, T>();
+  const localByMrsId = new Map<string, TLocal>();
   for (const record of localData) {
     const mrsId = getLocalMrsId(record);
     if (mrsId) {

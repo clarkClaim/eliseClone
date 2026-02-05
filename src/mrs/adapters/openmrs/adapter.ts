@@ -10,16 +10,13 @@ import type {
   MRSLocation,
   MRSAppointmentType,
   MRSAppointment,
-  MRSSlot,
   MRSScheduleConfig,
   PatientQuery,
   AppointmentFilter,
-  DateRange,
   CreateAppointmentRequest,
   NewPatient,
   ConflictCheckRequest,
   ConflictCheckResult,
-  SlotVerificationResult,
   HealthCheckResult,
 } from '../../types.js';
 import { NotFoundError, MRSValidationError } from '../../errors.js';
@@ -286,6 +283,14 @@ export class OpenMRSAdapter implements MRSAdapter {
   // Location Operations
   // ============================================
 
+  async getLocation(mrsId: string): Promise<MRSLocation | null> {
+    const response = await this.client.get<unknown>(`/location/${mrsId}?v=default`);
+    if (!response) {
+      return null;
+    }
+    return mapLocation(response as Parameters<typeof mapLocation>[0]);
+  }
+
   async getLocations(): Promise<MRSLocation[]> {
     const response = await this.client.get<unknown>(`/location?v=default&limit=${this.maxResults}`);
     if (!response) {
@@ -397,48 +402,9 @@ export class OpenMRSAdapter implements MRSAdapter {
     return { hasConflict: false };
   }
 
-  // ============================================
-  // Availability Operations (Deprecated)
-  // ============================================
-
-  /**
-   * Get availability for a date range.
-   *
-   * @deprecated Bahmni doesn't use slots. Use getScheduleConfig() + local AvailabilityService instead.
-   * This method returns empty array for Bahmni adapters.
-   */
-  async getAvailability(_range: DateRange): Promise<MRSSlot[]> {
-    console.warn('[OpenMRSAdapter] getAvailability() is deprecated. Use getScheduleConfig() + local AvailabilityService.');
-    // Bahmni doesn't have discrete timeslots - services define availability windows
-    return [];
-  }
-
-  /**
-   * Get availability for a specific provider.
-   *
-   * @deprecated Bahmni doesn't use provider-based slots. Use getScheduleConfig() + local AvailabilityService.
-   */
-  async getProviderAvailability(_providerMrsId: string, _dateRange: DateRange): Promise<MRSSlot[]> {
-    console.warn('[OpenMRSAdapter] getProviderAvailability() is deprecated. Use getScheduleConfig() + local AvailabilityService.');
-    // Bahmni doesn't have provider-specific slots
-    return [];
-  }
-
-  // ============================================
-  // Real-Time Slot Validation (Deprecated)
-  // ============================================
-
-  /**
-   * Verify slot availability.
-   *
-   * @deprecated Use checkConflicts() instead for datetime-based conflict detection.
-   * Bahmni doesn't use slots - this always returns available.
-   */
-  async verifySlotAvailable(_slotId: string): Promise<SlotVerificationResult> {
-    console.warn('[OpenMRSAdapter] verifySlotAvailable() is deprecated. Use checkConflicts() instead.');
-    // Bahmni doesn't have slots - always return available
-    return { available: true };
-  }
+  // NOTE: Deprecated slot-based methods (getAvailability, getProviderAvailability, verifySlotAvailable)
+  // have been removed. Use checkConflicts() for conflict detection and getScheduleConfig() + local
+  // AvailabilityService for availability computation.
 
   // ============================================
   // Appointment Operations
@@ -494,6 +460,30 @@ export class OpenMRSAdapter implements MRSAdapter {
     }
     if (!appointment.serviceId) {
       throw new MRSValidationError('serviceId is required for Bahmni appointments');
+    }
+
+    // Duplicate detection fallback (OpenMRS doesn't support idempotency keys)
+    // Check if an identical appointment already exists to prevent duplicates on retry
+    if (appointment.idempotencyKey) {
+      const existingAppointments = await this.getAppointments({
+        patientMrsId: appointment.patientMrsId,
+        startDate: appointment.startDateTime,
+        endDate: appointment.endDateTime,
+      });
+
+      // Look for an exact match (same patient, service, and time)
+      const duplicate = existingAppointments.find(apt =>
+        apt.patientMrsId === appointment.patientMrsId &&
+        apt.appointmentTypeMrsId === appointment.serviceId &&
+        apt.startTime.getTime() === appointment.startDateTime.getTime() &&
+        apt.endTime.getTime() === appointment.endDateTime.getTime() &&
+        apt.status !== 'cancelled'
+      );
+
+      if (duplicate) {
+        console.log(`[OpenMRSAdapter] Duplicate appointment detected for idempotency key ${appointment.idempotencyKey}, returning existing: ${duplicate.mrsId}`);
+        return duplicate;
+      }
     }
 
     const payload: {

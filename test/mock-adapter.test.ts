@@ -1,7 +1,7 @@
 // Mock Adapter Tests
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MockMRSAdapter } from '../src/mrs/adapters/mock/index.js';
-import { SlotConflictError, SlotNotFoundError, NotFoundError } from '../src/mrs/errors.js';
+import { SlotConflictError, NotFoundError } from '../src/mrs/errors.js';
 
 describe('MockMRSAdapter', () => {
   let adapter: MockMRSAdapter;
@@ -65,7 +65,7 @@ describe('MockMRSAdapter', () => {
     });
   });
 
-  describe('Slots and Appointments', () => {
+  describe('Appointments (Datetime-Based)', () => {
     const baseTime = new Date('2024-01-15T10:00:00Z');
     const endTime = new Date('2024-01-15T10:30:00Z');
 
@@ -80,31 +80,43 @@ describe('MockMRSAdapter', () => {
         name: 'John Doe',
         phoneNumbers: [],
       });
+    });
 
-      adapter.addSlot({
-        mrsId: 'slot-1',
-        providerMrsId: 'provider-1',
-        startTime: baseTime,
-        endTime: endTime,
-        isBooked: false,
+    it('should check for conflicts with checkConflicts()', async () => {
+      const result = await adapter.checkConflicts({
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
       });
+      expect(result.hasConflict).toBe(false);
     });
 
-    it('should verify slot availability', async () => {
-      const result = await adapter.verifySlotAvailable('slot-1');
-      expect(result.available).toBe(true);
-      expect(result.slot?.mrsId).toBe('slot-1');
+    it('should detect conflicts when appointment exists', async () => {
+      // Create an appointment
+      await adapter.createAppointment({
+        patientMrsId: 'patient-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
+        reason: 'Checkup',
+      });
+
+      // Check for conflict at same time
+      const result = await adapter.checkConflicts({
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
+      });
+      expect(result.hasConflict).toBe(true);
+      expect(result.conflictingAppointments).toHaveLength(1);
     });
 
-    it('should throw SlotNotFoundError for unknown slot', async () => {
-      await expect(adapter.verifySlotAvailable('unknown')).rejects.toThrow(SlotNotFoundError);
-    });
-
-    it('should create appointment', async () => {
+    it('should create appointment with datetime-based booking', async () => {
       const appointment = await adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
         reason: 'Checkup',
       });
 
@@ -113,25 +125,28 @@ describe('MockMRSAdapter', () => {
       expect(appointment.status).toBe('scheduled');
     });
 
-    it('should throw SlotConflictError for booked slot', async () => {
+    it('should throw SlotConflictError for overlapping appointment', async () => {
       await adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
       });
 
       await expect(adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
       })).rejects.toThrow(SlotConflictError);
     });
 
     it('should cancel appointment', async () => {
       const appointment = await adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
       });
 
       await adapter.cancelAppointment(appointment.mrsId, 'Patient request');
@@ -148,39 +163,6 @@ describe('MockMRSAdapter', () => {
 
     it('should throw NotFoundError when cancelling unknown appointment', async () => {
       await expect(adapter.cancelAppointment('unknown', 'reason')).rejects.toThrow(NotFoundError);
-    });
-  });
-
-  describe('Availability Query', () => {
-    it('should return slots within date range', async () => {
-      adapter.addProvider({ mrsId: 'provider-1', name: 'Dr. Smith' });
-
-      const jan15 = new Date('2024-01-15T10:00:00Z');
-      const jan16 = new Date('2024-01-16T10:00:00Z');
-
-      adapter.addSlot({
-        mrsId: 'slot-1',
-        providerMrsId: 'provider-1',
-        startTime: jan15,
-        endTime: new Date(jan15.getTime() + 30 * 60000),
-        isBooked: false,
-      });
-
-      adapter.addSlot({
-        mrsId: 'slot-2',
-        providerMrsId: 'provider-1',
-        startTime: jan16,
-        endTime: new Date(jan16.getTime() + 30 * 60000),
-        isBooked: false,
-      });
-
-      const slots = await adapter.getAvailability({
-        start: new Date('2024-01-15T00:00:00Z'),
-        end: new Date('2024-01-15T23:59:59Z'),
-      });
-
-      expect(slots).toHaveLength(1);
-      expect(slots[0].mrsId).toBe('slot-1');
     });
   });
 });

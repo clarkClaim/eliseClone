@@ -9,6 +9,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const VAPI_API_URL = 'https://api.vapi.ai';
+const API_DELAY_MS = 3000; // Delay between API calls to avoid rate limiting
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Cache for assistant list to avoid repeated API calls
+let cachedAssistants: VapiAssistant[] | null = null;
 
 interface VapiTool {
   id: string;
@@ -227,17 +235,21 @@ async function createOrUpdateAssistant(
     (assistantConfig.model as Record<string, unknown>).toolIds = toolIds;
   }
 
-  // Check if assistant already exists by name
-  const listResponse = await fetch(`${VAPI_API_URL}/assistant`, {
-    headers: { 'Authorization': `Bearer ${apiKey}` },
-  });
+  // Use cached assistant list, or fetch if not available
+  if (!cachedAssistants) {
+    const listResponse = await fetch(`${VAPI_API_URL}/assistant`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
 
-  if (!listResponse.ok) {
-    throw new Error(`Failed to list assistants: ${await listResponse.text()}`);
+    if (!listResponse.ok) {
+      throw new Error(`Failed to list assistants: ${await listResponse.text()}`);
+    }
+
+    cachedAssistants = await listResponse.json() as VapiAssistant[];
+    await sleep(API_DELAY_MS);
   }
 
-  const existingAssistants = await listResponse.json() as VapiAssistant[];
-  const existingAssistant = existingAssistants.find(a => a.name === name);
+  const existingAssistant = cachedAssistants.find(a => a.name === name);
 
   if (existingAssistant) {
     // Update existing assistant
@@ -274,6 +286,10 @@ async function createOrUpdateAssistant(
 
     const assistant = await response.json() as VapiAssistant;
     console.log(`    Created with ID: ${assistant.id}`);
+    // Add to cache so subsequent lookups find it
+    if (cachedAssistants) {
+      cachedAssistants.push(assistant);
+    }
     return assistant;
   }
 }
@@ -328,6 +344,7 @@ async function main() {
       if (toolName) {
         toolsMap.set(toolName, toolId);
       }
+      await sleep(API_DELAY_MS);
     }
 
     console.log(`\n  ${toolsMap.size} tools ready\n`);
@@ -386,6 +403,7 @@ async function main() {
           if (profile) {
             updateProfileConfig(profile, assistant.id, configDir);
           }
+          await sleep(API_DELAY_MS);
         }
       } catch (error) {
         console.error(`  Error processing ${file}:`, (error as Error).message);

@@ -5,6 +5,7 @@ import { prisma } from '../db/client.js';
 import type { MRSAdapter } from '../mrs/adapter.js';
 import type { MRSAppointment } from '../mrs/types.js';
 import { isTimeAvailable, isWithinSchedule } from './availability-service.js';
+import { invalidateAvailabilityCache, revalidateAvailabilityCache } from './availability-cache.js';
 import {
   MRSError,
   SlotConflictError,
@@ -194,7 +195,7 @@ export async function bookAppointmentByDatetime(
         const mrsConflict = await adapter.checkConflicts({
           startDateTime: request.startTime,
           endDateTime: request.endTime,
-          providerId: provider.mrsId,
+          providerId: provider.mrsId ?? undefined,
         });
 
         if (mrsConflict.hasConflict) {
@@ -207,13 +208,18 @@ export async function bookAppointmentByDatetime(
         }
 
         // Create appointment in MRS
+        if (!patient.mrsId || !service.mrsId) {
+          // Patient or service not synced to MRS - create locally and push later
+          throw new Error('Patient or service not synced to MRS');
+        }
+
         const mrsAppointment = await adapter.createAppointment({
           patientMrsId: patient.mrsId,
-          providerId: provider.mrsId,
+          providerId: provider.mrsId ?? undefined,
           serviceId: service.mrsId,
           startDateTime: request.startTime,
           endDateTime: request.endTime,
-          locationId: location?.mrsId,
+          locationId: location?.mrsId ?? undefined,
           reason: request.reason,
         });
 
@@ -234,6 +240,9 @@ export async function bookAppointmentByDatetime(
             mrsUpdatedAt: new Date(),
           },
         });
+
+        // Invalidate availability cache to prevent stale suggestions
+        invalidateAvailabilityCache(request.startTime, request.endTime, request.providerId);
 
         return {
           success: true,
@@ -298,10 +307,10 @@ export async function bookAppointmentByDatetime(
  */
 async function bookLocally(
   request: DatetimeBookingRequest,
-  patient: { id: string; mrsId: string },
-  provider: { id: string; name: string; mrsId: string },
-  service: { id: string; name: string; mrsId: string },
-  location: { id: string; name: string; mrsId: string } | null
+  patient: { id: string; mrsId: string | null },
+  provider: { id: string; name: string; mrsId: string | null },
+  service: { id: string; name: string; mrsId: string | null },
+  location: { id: string; name: string; mrsId: string | null } | null
 ): Promise<BookingResult> {
   console.log('[BookingService] Booking locally (MRS unavailable)');
 
@@ -329,6 +338,9 @@ async function bookLocally(
       maxAttempts: 5,
     },
   });
+
+  // Invalidate availability cache to prevent stale suggestions
+  invalidateAvailabilityCache(request.startTime, request.endTime, request.providerId);
 
   return {
     success: true,
@@ -469,6 +481,9 @@ export async function cancelAppointment(
           },
         });
 
+        // Revalidate availability cache to allow the time to be offered again
+        revalidateAvailabilityCache(appointment.startTime, appointment.endTime, appointment.providerId ?? undefined);
+
         return {
           success: true,
           syncStatus: 'synced',
@@ -505,6 +520,9 @@ export async function cancelAppointment(
       maxAttempts: 5,
     },
   });
+
+  // Revalidate availability cache to allow the time to be offered again
+  revalidateAvailabilityCache(appointment.startTime, appointment.endTime, appointment.providerId ?? undefined);
 
   return {
     success: true,

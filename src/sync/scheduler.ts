@@ -10,6 +10,7 @@ import {
   syncLocations,
   syncAvailability,
   syncAppointments,
+  syncAppointmentTypes,
 } from './entities/index.js';
 import type {
   EntityType,
@@ -168,6 +169,8 @@ export class SyncScheduler {
         return syncAvailability(this.adapter);
       case 'appointments':
         return syncAppointments(this.adapter);
+      case 'appointment_types':
+        return syncAppointmentTypes(this.adapter);
       default:
         throw new Error(`Unknown entity type: ${entityType}`);
     }
@@ -222,7 +225,8 @@ export class SyncScheduler {
   async triggerFullSync(): Promise<void> {
     console.log('[SyncScheduler] Starting full sync');
 
-    const entityOrder: EntityType[] = ['providers', 'locations', 'patients', 'availability', 'appointments'];
+    // Sync entities in dependency order: appointment_types and locations before appointments
+    const entityOrder: EntityType[] = ['appointment_types', 'locations', 'providers', 'patients', 'availability', 'appointments'];
 
     for (const entityType of entityOrder) {
       const result = await this.executeSyncForEntity(entityType);

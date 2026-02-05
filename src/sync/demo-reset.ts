@@ -40,11 +40,10 @@ export async function detectDemoReset(
     const patients = await adapter.getPatients({ limit: 1000 });
     currentCounts.patients = patients.length;
 
-    const availability = await adapter.getAvailability({
-      start: new Date(),
-      end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    });
-    currentCounts.availability = availability.length;
+    // Availability is now computed locally, not synced from MRS
+    // Count local schedule templates instead as a proxy for availability
+    const scheduleTemplates = await prisma.scheduleTemplate.count();
+    currentCounts.availability = scheduleTemplates;
 
     for (const entityType of ['providers', 'patients', 'availability'] as EntityType[]) {
       const prev = previousCounts[entityType] ?? 0;

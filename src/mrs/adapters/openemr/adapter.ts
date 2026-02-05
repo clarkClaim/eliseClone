@@ -10,16 +10,13 @@ import type {
   MRSLocation,
   MRSAppointmentType,
   MRSAppointment,
-  MRSSlot,
   MRSScheduleConfig,
   PatientQuery,
   AppointmentFilter,
-  DateRange,
   CreateAppointmentRequest,
   NewPatient,
   ConflictCheckRequest,
   ConflictCheckResult,
-  SlotVerificationResult,
   HealthCheckResult,
 } from '../../types.js';
 import { NotFoundError, MRSValidationError } from '../../errors.js';
@@ -232,6 +229,16 @@ export class OpenEMRAdapter implements MRSAdapter {
   // Location Operations
   // ============================================
 
+  async getLocation(mrsId: string): Promise<MRSLocation | null> {
+    // OpenEMR uses facility endpoint for locations
+    const response = await this.client.get<OpenEMRFacilityListResponse>('/facility');
+    if (!response) {
+      return null;
+    }
+    const locations = mapOpenEMRLocationList(response);
+    return locations.find(loc => loc.mrsId === mrsId) ?? null;
+  }
+
   async getLocations(): Promise<MRSLocation[]> {
     const response = await this.client.get<OpenEMRFacilityListResponse>('/facility');
     if (!response) {
@@ -312,29 +319,9 @@ export class OpenEMRAdapter implements MRSAdapter {
     return { hasConflict: false };
   }
 
-  // ============================================
-  // Availability Operations (Deprecated)
-  // ============================================
-
-  async getAvailability(_range: DateRange): Promise<MRSSlot[]> {
-    console.warn('[OpenEMRAdapter] getAvailability() is deprecated. OpenEMR uses appointment-based scheduling.');
-    return [];
-  }
-
-  async getProviderAvailability(_providerMrsId: string, _dateRange: DateRange): Promise<MRSSlot[]> {
-    console.warn('[OpenEMRAdapter] getProviderAvailability() is deprecated. OpenEMR uses appointment-based scheduling.');
-    return [];
-  }
-
-  // ============================================
-  // Real-Time Slot Validation (Deprecated)
-  // ============================================
-
-  async verifySlotAvailable(_slotId: string): Promise<SlotVerificationResult> {
-    console.warn('[OpenEMRAdapter] verifySlotAvailable() is deprecated. Use checkConflicts() instead.');
-    // OpenEMR doesn't have slots - always return available
-    return { available: true };
-  }
+  // NOTE: Deprecated slot-based methods (getAvailability, getProviderAvailability, verifySlotAvailable)
+  // have been removed. Use checkConflicts() for conflict detection and getScheduleConfig() + local
+  // AvailabilityService for availability computation.
 
   // ============================================
   // Appointment Operations

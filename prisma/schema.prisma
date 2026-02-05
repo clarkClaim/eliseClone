@@ -274,6 +274,8 @@ model Job {
   // Exponential backoff for retries
   backoffExponent Int       @default(1) @map("backoff_exponent")
   nextRetryAt     DateTime? @map("next_retry_at")
+  // Idempotency key for push operations - prevents duplicates on retry
+  idempotencyKey  String?   @unique @map("idempotency_key")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 

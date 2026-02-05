@@ -32,7 +32,7 @@ export async function syncAppointmentTypes(adapter: MRSAdapter): Promise<SyncRes
             where: { id: existing.id },
             data: {
               name: mrsType.name,
-              durationMinutes: mrsType.durationMins ?? existing.durationMinutes,
+              durationMinutes: mrsType.durationMinutes ?? existing.durationMinutes,
             },
           });
           updated++;
@@ -43,7 +43,7 @@ export async function syncAppointmentTypes(adapter: MRSAdapter): Promise<SyncRes
           data: {
             mrsId: mrsType.mrsId,
             name: mrsType.name,
-            durationMinutes: mrsType.durationMins ?? 30,
+            durationMinutes: mrsType.durationMinutes ?? 30,
           },
         });
         created++;

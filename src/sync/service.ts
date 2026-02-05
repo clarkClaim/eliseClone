@@ -1,5 +1,19 @@
 // Sync Service
 // Synchronizes data between OpenMRS and the local Context Store
+//
+// @deprecated This class is deprecated and will be removed in a future version.
+// Use SyncScheduler from './scheduler.js' instead, which provides:
+// - Entity-specific sync intervals
+// - Better rate limiting and observability
+// - Initial sync support via initialSync() from './startup.js'
+//
+// REMOVAL TIMELINE: This class will be removed after 2 weeks of stable
+// SyncScheduler operation (estimated: 2026-02-19).
+//
+// MIGRATION: Update imports from:
+//   import { SyncService } from './sync/index.js';
+// To:
+//   import { SyncScheduler } from './sync/index.js';
 
 import { prisma } from '../db/client.js';
 import type { MRSAdapter } from '../mrs/adapter.js';
@@ -28,6 +42,10 @@ export interface SyncServiceConfig {
 
 type EntityType = 'patients' | 'providers' | 'appointments' | 'timeslots';
 
+/**
+ * @deprecated Use SyncScheduler instead. This class will be removed after 2026-02-19.
+ * See migration guide in file header comments.
+ */
 export class SyncService {
   private readonly adapter: MRSAdapter;
   private readonly intervalMs: number;
@@ -38,6 +56,10 @@ export class SyncService {
   private requestCount = 0;
 
   constructor(config: SyncServiceConfig) {
+    console.warn(
+      '[SyncService] DEPRECATION WARNING: SyncService is deprecated and will be removed after 2026-02-19. ' +
+      'Use SyncScheduler instead for entity-specific sync intervals and better observability.'
+    );
     this.adapter = config.adapter;
     this.intervalMs = config.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS;
     this.maxRequestsPerCycle = config.maxRequestsPerCycle ?? DEFAULT_MAX_REQUESTS_PER_CYCLE;
@@ -257,6 +279,7 @@ export class SyncService {
       let recordsProcessed = 0;
 
       for (const { mrsId } of localPatients) {
+        if (!mrsId) continue; // Skip patients without mrsId
         if (!await this.throttle()) break;
 
         const mrsPatient = await this.adapter.getPatient(mrsId);
@@ -324,40 +347,14 @@ export class SyncService {
   // ============================================
 
   private async syncAvailability(): Promise<void> {
-    const entityType: EntityType = 'timeslots';
-    const syncStart = Date.now();
-
-    try {
-      await this.updateSyncState(entityType, 'running');
-
-      const providers = await prisma.provider.findMany();
-      const dateRange = {
-        start: new Date(),
-        end: new Date(Date.now() + LOOKBACK_DAYS * 24 * 60 * 60 * 1000),
-      };
-
-      let recordsProcessed = 0;
-      const seenMrsIds = new Set<string>();
-
-      for (const provider of providers) {
-        const slots = await this.adapter.getProviderAvailability(provider.mrsId, dateRange);
-
-        for (const slot of slots) {
-          seenMrsIds.add(slot.mrsId);
-          await this.upsertSlot(slot, provider.id);
-          recordsProcessed++;
-        }
-      }
-
-      // Mark slots deleted from MRS
-      await this.markDeletedSlots(seenMrsIds);
-
-      await this.completeSyncState(entityType, syncStart, recordsProcessed);
-      console.log(`[Sync] Availability: ${recordsProcessed} processed`);
-    } catch (error) {
-      await this.failSyncState(entityType, error);
-      throw error;
-    }
+    // NOTE: Availability sync has been removed. Use SyncScheduler instead.
+    // Availability is now computed locally from ScheduleTemplates.
+    console.warn(
+      '[SyncService] syncAvailability() is no longer supported. ' +
+      'Availability is computed locally from ScheduleTemplates. ' +
+      'Use SyncScheduler for appointment sync.'
+    );
+    // No-op - availability is computed locally now
   }
 
   private async upsertSlot(slot: MRSSlot, providerId: string): Promise<void> {
@@ -778,14 +775,14 @@ export class SyncService {
 
   private async pushAppointmentToMRS(appt: {
     id: string;
-    patient: { mrsId: string };
+    patient: { mrsId: string | null };
     slot: {
       mrsId: string | null;
       startTime: Date;
       endTime: Date;
-      provider: { mrsId: string };
-      appointmentType?: { mrsId: string } | null;
-      location?: { mrsId: string } | null;
+      provider: { mrsId: string | null };
+      appointmentType?: { mrsId: string | null } | null;
+      location?: { mrsId: string | null } | null;
     };
     reason: string | null;
     syncAttempts: number;
@@ -796,14 +793,17 @@ export class SyncService {
       if (!appt.slot.appointmentType?.mrsId) {
         throw new Error('Cannot push appointment - appointment type (service) not set');
       }
+      if (!appt.patient.mrsId) {
+        throw new Error('Cannot push appointment - patient not synced to MRS');
+      }
 
       const created = await this.adapter.createAppointment({
         patientMrsId: appt.patient.mrsId,
-        providerId: appt.slot.provider.mrsId,
+        providerId: appt.slot.provider.mrsId ?? undefined,
         serviceId: appt.slot.appointmentType.mrsId,
         startDateTime: appt.slot.startTime,
         endDateTime: appt.slot.endTime,
-        locationId: appt.slot.location?.mrsId,
+        locationId: appt.slot.location?.mrsId ?? undefined,
         reason: appt.reason ?? undefined,
       });
 
@@ -858,46 +858,34 @@ export class SyncService {
   // ============================================
 
   /**
+   * @deprecated Use adapter.checkConflicts() instead. Slot-based verification has been removed.
    * Verify a slot is available in MRS before confirming a booking.
    */
   async verifySlotAvailable(slotId: string): Promise<boolean> {
+    // NOTE: Slot-based verification has been removed. Use checkConflicts() instead.
+    console.warn(
+      '[SyncService] verifySlotAvailable() is deprecated. ' +
+      'Use adapter.checkConflicts() for datetime-based conflict checking.'
+    );
+
     const slot = await prisma.availability.findUnique({
       where: { id: slotId },
       include: { provider: true },
     });
 
-    if (!slot || !slot.mrsId) {
+    if (!slot) {
       return false;
     }
 
+    // Use checkConflicts instead of the removed getProviderAvailability
     try {
-      const dateRange = {
-        start: slot.startTime,
-        end: slot.endTime,
-      };
+      const conflictResult = await this.adapter.checkConflicts({
+        startDateTime: slot.startTime,
+        endDateTime: slot.endTime,
+        providerId: slot.provider.mrsId ?? undefined,
+      });
 
-      const mrsSlots = await this.adapter.getProviderAvailability(slot.provider.mrsId, dateRange);
-      const mrsSlot = mrsSlots.find(s => s.mrsId === slot.mrsId);
-
-      if (!mrsSlot) {
-        // Slot deleted from MRS
-        await prisma.availability.update({
-          where: { id: slotId },
-          data: { mrsExists: false },
-        });
-        return false;
-      }
-
-      if (mrsSlot.isBooked) {
-        // Slot booked externally
-        await prisma.availability.update({
-          where: { id: slotId },
-          data: { isBooked: true },
-        });
-        return false;
-      }
-
-      return true;
+      return !conflictResult.hasConflict;
     } catch (error) {
       console.error('[Sync] Failed to verify slot:', error);
       // On error, allow booking (optimistic)

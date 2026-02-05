@@ -49,6 +49,7 @@ export const OPENMRS_CAPABILITIES: MRSCapabilities = {
     supportsIncrementalSync: false,  // No modified-since parameter
     supportsWebhooks: false,          // No webhook support
     hasModifiedSinceQuery: false,     // Must fetch all and compare
+    supportsIdempotencyKeys: false,   // OpenMRS doesn't support idempotency keys
   },
 
   rateLimits: {
@@ -146,6 +147,7 @@ export const OPENMRS_CAPABILITIES_NO_APPOINTMENTS: MRSCapabilities = {
     supportsIncrementalSync: false,
     supportsWebhooks: false,
     hasModifiedSinceQuery: false,
+    supportsIdempotencyKeys: false,
   },
 
   rateLimits: {

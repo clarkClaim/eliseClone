@@ -34,6 +34,7 @@ export const OPENEMR_CAPABILITIES: MRSCapabilities = {
     supportsIncrementalSync: false,
     supportsWebhooks: false,
     hasModifiedSinceQuery: false,
+    supportsIdempotencyKeys: false,
   },
 
   rateLimits: {

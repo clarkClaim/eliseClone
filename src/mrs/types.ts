@@ -5,27 +5,69 @@
 // MRS CAPABILITIES
 // ============================================
 
+/**
+ * Describes what operations an MRS adapter supports.
+ *
+ * Each MRS (Medical Record System) has different capabilities. Check these
+ * before attempting operations to handle graceful fallbacks.
+ *
+ * @example
+ * ```typescript
+ * if (adapter.capabilities.appointments.canReschedule) {
+ *   await adapter.rescheduleAppointment(apptId, newTime);
+ * } else {
+ *   await adapter.cancelAppointment(apptId);
+ *   await adapter.createAppointment(newAppointment);
+ * }
+ * ```
+ */
 export interface MRSCapabilities {
+  /**
+   * Patient search capabilities.
+   * Determines which search methods are available.
+   */
   patientSearch: {
+    /** Can search patients by phone number */
     byPhone: boolean;
+    /** Can search patients by name */
     byName: boolean;
+    /** Can search patients by date of birth */
     byDOB: boolean;
+    /** Can search patients by MRN or other identifier */
     byIdentifier: boolean;
+    /** Can search across all patients (not just recent) */
     globalSearch: boolean;
   };
 
+  /**
+   * Appointment operation capabilities.
+   * Determines which CRUD operations are available.
+   */
   appointments: {
+    /** Can create new appointments via API */
     canCreate: boolean;
+    /** Can cancel existing appointments via API */
     canCancel: boolean;
+    /** Can reschedule (without cancel+create) */
     canReschedule: boolean;
+    /** Can query appointments by date range */
     canQueryByDateRange: boolean;
+    /** Can query appointments by patient ID */
     canQueryByPatient: boolean;
+    /** List of status values supported by this MRS */
     supportsStatuses: string[];
   };
 
-  /** Scheduling model capabilities */
+  /**
+   * Scheduling model capabilities.
+   * Describes how the MRS handles scheduling.
+   */
   scheduling: {
-    /** Whether this MRS uses slots or direct datetime booking */
+    /**
+     * The scheduling model used by this MRS:
+     * - 'appointment_based': Direct datetime booking (e.g., Bahmni)
+     * - 'slot_based': Pre-defined slots that get booked (legacy)
+     */
     model: 'appointment_based' | 'slot_based';
     /** Whether MRS can provide service/schedule configuration */
     supportsScheduleConfig: boolean;
@@ -35,16 +77,37 @@ export interface MRSCapabilities {
     requiresServiceId: boolean;
   };
 
+  /**
+   * Sync capabilities.
+   * Describes how data synchronization works.
+   */
   sync: {
+    /** Supports fetching only changed records since last sync */
     supportsIncrementalSync: boolean;
+    /** Supports push notifications via webhooks */
     supportsWebhooks: boolean;
+    /** Has modified-since query parameter */
     hasModifiedSinceQuery: boolean;
+    /**
+     * Whether MRS supports idempotency keys for duplicate detection.
+     * If false, the adapter should implement duplicate detection locally
+     * by checking for existing appointments before creating.
+     */
+    supportsIdempotencyKeys: boolean;
   };
 
+  /**
+   * Rate limiting configuration.
+   * null values mean no known limit.
+   */
   rateLimits: {
+    /** Maximum requests per minute */
     requestsPerMinute: number | null;
+    /** Maximum requests per hour */
     requestsPerHour: number | null;
+    /** Maximum concurrent/burst requests */
     burstLimit: number | null;
+    /** Per-endpoint rate limits (endpoint path -> requests/minute) */
     perEndpointLimits: Record<string, number>;
   };
 }
@@ -118,6 +181,8 @@ export interface MRSAppointment {
   providerMrsId: string;
   locationMrsId?: string;
   appointmentTypeMrsId?: string;
+  /** Service/appointment type name for fallback matching when mrsId not found */
+  serviceName?: string;
   startTime: Date;
   endTime: Date;
   status: MRSAppointmentStatus;
@@ -219,6 +284,13 @@ export interface CreateAppointmentRequest {
   locationId?: string;
   /** Reason/comments for the appointment */
   reason?: string;
+  /**
+   * Idempotency key for duplicate detection on retries.
+   * If the MRS supports idempotency keys, it will reject duplicate requests
+   * with the same key. If not supported, the adapter should implement
+   * duplicate detection by checking for existing appointments.
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -245,17 +317,8 @@ export interface NewAppointment {
 }
 
 // ============================================
-// SLOT VERIFICATION
-// ============================================
-
-/**
- * @deprecated Use ConflictCheckResult instead.
- * Slot verification is being replaced by datetime-based conflict checking.
- */
-export interface SlotVerificationResult {
-  available: boolean;
-  slot?: MRSSlot;
-}
+// NOTE: SlotVerificationResult has been removed.
+// Use ConflictCheckResult with checkConflicts() instead for datetime-based conflict detection.
 
 // ============================================
 // HEALTH CHECK

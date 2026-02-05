@@ -182,7 +182,7 @@ async function getPatientFromConversation(callId?: string): Promise<string | nul
   return conversation?.patientId ?? null;
 }
 
-async function findProviderByName(name: string): Promise<{ id: string; name: string; mrsId: string } | null> {
+async function findProviderByName(name: string): Promise<{ id: string; name: string; mrsId: string | null } | null> {
   // Search by name (case-insensitive, partial match)
   const normalizedName = name.toLowerCase().trim();
   const providers = await prisma.provider.findMany({
@@ -208,7 +208,7 @@ async function findProviderByName(name: string): Promise<{ id: string; name: str
 async function findAvailableProvider(
   startTime: Date,
   endTime: Date
-): Promise<{ id: string; name: string; mrsId: string } | null> {
+): Promise<{ id: string; name: string; mrsId: string | null } | null> {
   // Get all providers with schedule templates
   const providers = await prisma.provider.findMany({
     where: {
@@ -230,7 +230,7 @@ async function findAvailableProvider(
 interface ServiceInfo {
   id: string;
   name: string;
-  mrsId: string;
+  mrsId: string | null;
   durationMinutes: number;
 }
 

@@ -87,7 +87,7 @@ export async function syncPatients(
         await resolveConflict({
           entityType: ENTITY_TYPE,
           entityId: localPatient.id,
-          mrsId: localPatient.mrsId,
+          mrsId: localPatient.mrsId ?? undefined,
           conflictType: 'deleted_in_mrs',
           localState: localPatient,
         });

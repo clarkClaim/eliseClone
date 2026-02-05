@@ -1,0 +1,18 @@
+{
+  "_comment": "Test: Unified manage_appointment tool instead of separate book/cancel/reschedule",
+  "profile": "mrs",
+  "template": {
+    "ASSISTANT_NAME": "Elise - Test Tools Unified",
+    "OFFICE_NAME": "Maple Grove Medical",
+    "OFFICE_INFO": "Primary care clinic open Monday-Friday 8am-5pm",
+    "FIRST_MESSAGE": "Hi, this is Elise from Maple Grove Medical. May I have your date of birth?",
+    "STYLE_TONE": "Professional and helpful"
+  },
+  "overrides": {
+    "voice": {
+      "provider": "deepgram",
+      "voiceId": "asteria"
+    }
+  },
+  "toolFilter": ["identify_patient", "save_new_patient", "manage_appointment", "get_availability"]
+}

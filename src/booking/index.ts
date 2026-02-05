@@ -1,14 +1,13 @@
 // Booking Flow Exports
+// Re-exports from the datetime-based booking service
+
 export {
-  checkAvailability,
-  bookAppointment,
+  bookAppointmentByDatetime,
   cancelAppointment,
-  refreshAvailability,
-  type SlotWithFreshness,
-  type AvailabilityResponse,
-  type BookingRequest,
-  type BookingResponse,
+  checkLocalConflicts,
+  type DatetimeBookingRequest,
+  type BookingResult,
   type CancellationRequest,
-  type CancellationResponse,
-  type SyncStatus,
-} from './mrs-booking.js';
+  type CancellationResult,
+  type ConflictInfo,
+} from '../scheduling/booking-service.js';

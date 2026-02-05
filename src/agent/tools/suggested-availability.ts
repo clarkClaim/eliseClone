@@ -1,6 +1,7 @@
 import { prisma } from '../../db/client.js';
 import { formatDateForSpeech, formatTimeForSpeech } from '../../utils/date.js';
 import { searchAvailability } from '../../scheduling/index.js';
+import { isTimeInvalidated } from '../../scheduling/availability-cache.js';
 
 export interface SuggestedSlot {
   dateForSpeech: string;
@@ -38,6 +39,7 @@ export async function getSuggestedAvailability(): Promise<SuggestedAvailability>
   const providerMap = new Map(providers.map(p => [p.id, p.name]));
 
   // Take first 3 slots across different days for variety
+  // Filter out any slots that were recently booked (in invalidation cache)
   const slots: SuggestedSlot[] = [];
   const seenDates = new Set<string>();
 
@@ -45,7 +47,11 @@ export async function getSuggestedAvailability(): Promise<SuggestedAvailability>
     if (slots.length >= 3) break;
     if (seenDates.has(isoDate)) continue;
 
-    const firstWindow = windows[0];
+    // Find first window that is not invalidated
+    const availableWindow = windows.find(w =>
+      !isTimeInvalidated(w.startTime, w.endTime, w.providerId)
+    );
+    const firstWindow = availableWindow;
     if (!firstWindow) continue;
 
     const rawName = firstWindow.providerId ? providerMap.get(firstWindow.providerId) : undefined;

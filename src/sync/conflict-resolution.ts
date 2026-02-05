@@ -114,8 +114,8 @@ export function getResolutionAction(
 /**
  * Log a conflict to the database.
  */
-export async function logConflict<T>(
-  conflict: ConflictRecord<T>,
+export async function logConflict<TMrs, TLocal = TMrs>(
+  conflict: ConflictRecord<TMrs, TLocal>,
   resolution: string
 ): Promise<void> {
   await prisma.syncConflict.create({
@@ -134,8 +134,8 @@ export async function logConflict<T>(
 /**
  * Resolve a conflict and log it.
  */
-export async function resolveConflict<T>(
-  conflict: ConflictRecord<T>
+export async function resolveConflict<TMrs, TLocal = TMrs>(
+  conflict: ConflictRecord<TMrs, TLocal>
 ): Promise<{ action: ResolutionAction; description: string }> {
   const rule = getResolutionRule(conflict.conflictType, conflict.entityType);
   const action = rule?.action ?? 'flag_for_review';

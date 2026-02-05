@@ -13,15 +13,13 @@ import type {
   MRSSlot,
   PatientQuery,
   AppointmentFilter,
-  DateRange,
   CreateAppointmentRequest,
   NewPatient,
   ConflictCheckRequest,
   ConflictCheckResult,
-  SlotVerificationResult,
   HealthCheckResult,
 } from '../../types.js';
-import { SlotNotFoundError, NotFoundError, MRSUnavailableError, MRSValidationError } from '../../errors.js';
+import { NotFoundError, MRSUnavailableError, MRSValidationError, SlotConflictError } from '../../errors.js';
 
 export interface MockAdapterConfig {
   healthy?: boolean;
@@ -58,6 +56,7 @@ export class MockMRSAdapter implements MRSAdapter {
       supportsIncrementalSync: false,
       supportsWebhooks: false,
       hasModifiedSinceQuery: false,
+      supportsIdempotencyKeys: false,
     },
     rateLimits: {
       requestsPerMinute: 60,
@@ -214,6 +213,12 @@ export class MockMRSAdapter implements MRSAdapter {
     return Array.from(this.providers.values());
   }
 
+  async getLocation(mrsId: string): Promise<MRSLocation | null> {
+    await this.simulateLatency();
+    this.maybeThrowError();
+    return this.locations.get(mrsId) ?? null;
+  }
+
   async getLocations(): Promise<MRSLocation[]> {
     await this.simulateLatency();
     this.maybeThrowError();
@@ -226,41 +231,8 @@ export class MockMRSAdapter implements MRSAdapter {
     return Array.from(this.appointmentTypes.values());
   }
 
-  async getAvailability(range: DateRange): Promise<MRSSlot[]> {
-    await this.simulateLatency();
-    this.maybeThrowError();
-
-    return Array.from(this.slots.values()).filter(
-      slot => slot.startTime >= range.start && slot.endTime <= range.end
-    );
-  }
-
-  async getProviderAvailability(providerMrsId: string, dateRange: DateRange): Promise<MRSSlot[]> {
-    await this.simulateLatency();
-    this.maybeThrowError();
-
-    return Array.from(this.slots.values()).filter(
-      slot =>
-        slot.providerMrsId === providerMrsId &&
-        slot.startTime >= dateRange.start &&
-        slot.endTime <= dateRange.end
-    );
-  }
-
-  async verifySlotAvailable(slotId: string): Promise<SlotVerificationResult> {
-    await this.simulateLatency();
-    this.maybeThrowError();
-
-    const slot = this.slots.get(slotId);
-    if (!slot) {
-      throw new SlotNotFoundError(slotId);
-    }
-
-    return {
-      available: !slot.isBooked,
-      slot,
-    };
-  }
+  // NOTE: Deprecated slot-based methods (getAvailability, getProviderAvailability, verifySlotAvailable)
+  // have been removed. Use checkConflicts() for conflict detection.
 
   async checkConflicts(request: ConflictCheckRequest): Promise<ConflictCheckResult> {
     await this.simulateLatency();
@@ -325,6 +297,33 @@ export class MockMRSAdapter implements MRSAdapter {
     }
     if (!appointment.serviceId) {
       throw new MRSValidationError('serviceId is required');
+    }
+
+    // Duplicate detection fallback (mock adapter doesn't support idempotency keys)
+    if (appointment.idempotencyKey) {
+      for (const existing of this.appointments.values()) {
+        if (
+          existing.patientMrsId === appointment.patientMrsId &&
+          existing.appointmentTypeMrsId === appointment.serviceId &&
+          existing.startTime.getTime() === appointment.startDateTime.getTime() &&
+          existing.endTime.getTime() === appointment.endDateTime.getTime() &&
+          existing.status !== 'cancelled'
+        ) {
+          console.log(`[MockAdapter] Duplicate appointment detected, returning existing: ${existing.mrsId}`);
+          return existing;
+        }
+      }
+    }
+
+    // Check for conflicts before creating
+    const conflictResult = await this.checkConflicts({
+      startDateTime: appointment.startDateTime,
+      endDateTime: appointment.endDateTime,
+      providerId: appointment.providerId,
+    });
+
+    if (conflictResult.hasConflict) {
+      throw new SlotConflictError('Time slot is already booked');
     }
 
     const mrsAppointment: MRSAppointment = {
