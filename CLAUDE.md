@@ -12,16 +12,48 @@ The database schema, project structure, and local development environment are fu
 
 Sync Service connecting to OpenMRS. Key considerations documented in `docs/PHASE2_SYNC_CONSIDERATIONS.md`.
 
-**Phase 3: Agent Patient ID** - In Progress (43/44 tasks)
+**Phase 3: Agent Patient ID** - Complete
 
 VAPI voice integration for patient identification:
 - Express server with VAPI webhook endpoints (`/vapi/tools`)
 - `identify_patient` tool - lookup by phone (caller ID) + DOB, fallback to name
 - `save_new_patient` tool - register new patients
+- `get_availability` tool - flexible availability search with business hours, lead time
+- `book_appointment` tool - book appointments with conflict handling
 - Seed data with 8 test patients
-- VAPI assistant config tracked in git (`config/vapi-assistant.json`)
 
-See `openspec/changes/agent-patient-id/` for full specs and tasks.
+## VAPI Assistant Config Architecture
+
+The assistant prompt system uses a **centralized template** approach:
+
+```
+config/assistants/
+├── _base_assistant.json    # Centralized prompt with {{VARIABLE}} placeholders
+├── evergreen.json          # Office config: template vars + overrides
+└── maple-grove.json        # Office config: template vars + overrides
+```
+
+**How it works:**
+- `_base_assistant.json` contains the full system prompt with `{{OFFICE_NAME}}`, `{{STYLE_TONE}}`, etc.
+- Office configs (e.g., `evergreen.json`) provide variable values and VAPI setting overrides (voice, delays)
+- `pnpm run vapi:setup` merges base + variables + overrides and deploys to VAPI
+
+**To update the assistant prompt:** Edit `_base_assistant.json`, then run `pnpm run vapi:setup`.
+
+**Office config structure:**
+```json
+{
+  "profile": "emr",
+  "template": {
+    "ASSISTANT_NAME": "Elise - Evergreen Health",
+    "OFFICE_NAME": "Evergreen Health",
+    "STYLE_TONE": "Friendly and caring"
+  },
+  "overrides": {
+    "voice": { "provider": "deepgram", "voiceId": "asteria" }
+  }
+}
+```
 
 ## OpenSpec Workflow
 
@@ -58,6 +90,11 @@ Located in `openspec/specs/`:
 
 - `2026-02-04-add-project-readme` - Initial README
 - `2026-02-04-project-scaffolding` - Full project setup with database schema
+- `2026-02-05-existing-appointments-tool-stale` - Superseded by v2 (used old config paths)
+
+### Active Changes
+
+- `existing-appointments-v2` - Add upcoming appointments to identify_patient response
 
 ## Key Documentation
 
@@ -87,4 +124,14 @@ pnpm run dev              # Start server with hot reload
 pnpm run build            # Compile TypeScript
 pnpm exec prisma studio   # Browse database
 pnpm exec prisma migrate dev  # Run migrations
+```
+
+## VAPI Commands
+
+```bash
+pnpm run vapi:setup       # Deploy assistant configs to VAPI (all offices)
+pnpm run vapi:setup evergreen  # Deploy specific office only
+pnpm run vapi:logs        # List recent calls
+pnpm run vapi:logs --last # Show transcript of last call
+pnpm run vapi:list        # List assistants and phone numbers
 ```

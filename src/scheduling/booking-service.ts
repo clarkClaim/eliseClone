@@ -5,6 +5,13 @@ import { prisma } from '../db/client.js';
 import type { MRSAdapter } from '../mrs/adapter.js';
 import type { MRSAppointment } from '../mrs/types.js';
 import { isTimeAvailable, isWithinSchedule } from './availability-service.js';
+import {
+  MRSError,
+  SlotConflictError,
+  MRSValidationError,
+  TimeoutError,
+  MRSUnavailableError,
+} from '../mrs/errors.js';
 
 // ============================================
 // Types
@@ -238,8 +245,46 @@ export async function bookAppointmentByDatetime(
         };
       }
     } catch (error) {
-      console.log(`[BookingService] MRS error, falling back to local booking: ${error}`);
-      // Fall through to local booking
+      // Handle MRS errors - distinguish between "unavailable" and "rejected"
+      if (error instanceof SlotConflictError) {
+        // Conflict detected during booking - do NOT fall back to local
+        console.log(`[BookingService] MRS conflict error: ${error.message}`);
+        return {
+          success: false,
+          syncStatus: 'synced',
+          message: 'Sorry, that time was just taken. Please choose another time.',
+          error: 'conflict',
+        };
+      }
+
+      if (error instanceof MRSValidationError) {
+        // MRS rejected the booking due to validation - do NOT fall back to local
+        console.log(`[BookingService] MRS validation error: ${error.message}`);
+        return {
+          success: false,
+          syncStatus: 'synced',
+          message: 'There was a problem with that booking. Please try a different time.',
+          error: 'validation_error',
+        };
+      }
+
+      // For retryable errors (timeout, unavailable), fall back to local booking
+      if (error instanceof TimeoutError || error instanceof MRSUnavailableError) {
+        console.log(`[BookingService] MRS unavailable, falling back to local booking: ${error.message}`);
+        // Fall through to local booking
+      } else if (error instanceof MRSError && !error.retryable) {
+        // Other non-retryable MRS errors - don't fall back to local
+        console.log(`[BookingService] MRS non-retryable error: ${error.message}`);
+        return {
+          success: false,
+          syncStatus: 'synced',
+          message: 'Unable to complete the booking. Please try again or choose a different time.',
+          error: 'validation_error',
+        };
+      } else {
+        // Unknown error - log and fall back to local for resilience
+        console.log(`[BookingService] MRS unknown error, falling back to local booking: ${error}`);
+      }
     }
   }
 

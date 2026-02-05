@@ -6,6 +6,7 @@ import type { MRSAdapter } from '../mrs/adapter.js';
 import type { MRSPatient, MRSProvider, MRSAppointment, MRSSlot, NewPatient } from '../mrs/types.js';
 import { MRSError } from '../mrs/errors.js';
 import { syncScheduleTemplates } from './entities/schedule-templates.js';
+import { processPushJobs } from './push/appointment-push.js';
 
 const DEFAULT_SYNC_INTERVAL_MS = 300000; // 5 minutes
 const DEFAULT_MAX_REQUESTS_PER_CYCLE = 20; // Leave bandwidth for real-time ops
@@ -137,7 +138,13 @@ export class SyncService {
       await this.syncAppointmentsFromMRS();
       // Push local entities to MRS (patients before appointments)
       await this.pushPatientsToMRS();
-      await this.pushAppointmentsToMRS();
+
+      // Process queued push jobs for appointments
+      // This handles both datetime-based (new) and slot-based (legacy) appointments
+      const jobsProcessed = await processPushJobs(this.adapter);
+      if (jobsProcessed > 0) {
+        console.log(`[Sync] Processed ${jobsProcessed} appointment push jobs`);
+      }
 
       const duration = Date.now() - startTime;
       console.log(`[Sync] Cycle complete in ${duration}ms`);

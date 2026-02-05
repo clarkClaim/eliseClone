@@ -1,5 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { loadEnv } from '../utils/env.js';
+
+// Ensure env is loaded before checking DATABASE_URL
+loadEnv();
 
 // Global singleton for Prisma client
 // Prevents multiple instances in development with hot reload

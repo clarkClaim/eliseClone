@@ -18,14 +18,16 @@ const prisma = new PrismaClient({ adapter });
 // Test Providers
 // ============================================
 
-const testProviders = [
+// Local test providers for development/testing
+// NOTE: mrsId is null - these are local-only providers
+// MRS providers are synced separately and have real MRS UUIDs
+// The booking flow should use MRS-synced providers for MRS integration
+const testProviders: { name: string; specialty: string }[] = [
   {
-    mrsId: 'test-provider-001',
     name: 'Dr. Smith',
     specialty: 'General Practice',
   },
   {
-    mrsId: 'test-provider-002',
     name: 'Dr. Jones',
     specialty: 'Internal Medicine',
   },
@@ -35,21 +37,22 @@ const testProviders = [
 // Test Services (Appointment Types)
 // ============================================
 
-const testServices = [
+// Local test services for development/testing
+// NOTE: mrsId is null - these are local-only services
+// MRS services are synced separately and have real MRS UUIDs
+// The booking flow should use MRS-synced services for MRS integration
+const testServices: { name: string; durationMinutes: number; description: string }[] = [
   {
-    mrsId: 'test-service-001',
     name: 'General Checkup',
     durationMinutes: 30,
     description: 'Annual health checkup',
   },
   {
-    mrsId: 'test-service-002',
     name: 'Follow-up Visit',
     durationMinutes: 15,
     description: 'Follow-up consultation',
   },
   {
-    mrsId: 'test-service-003',
     name: 'New Patient Consultation',
     durationMinutes: 60,
     description: 'Initial consultation for new patients',
@@ -173,19 +176,34 @@ const testPatients = [
 async function seedProviders() {
   console.log('\nSeeding providers...');
 
-  const providers: { id: string; name: string; mrsId: string }[] = [];
+  const providers: { id: string; name: string; mrsId: string | null }[] = [];
 
   for (const provider of testProviders) {
-    const upserted = await prisma.provider.upsert({
-      where: { mrsId: provider.mrsId },
-      update: {
-        name: provider.name,
-        specialty: provider.specialty,
-      },
-      create: provider,
+    // Check if provider already exists by name (could have been synced from MRS)
+    const existing = await prisma.provider.findFirst({
+      where: { name: provider.name },
     });
+
+    let upserted;
+    if (existing) {
+      // Update existing provider (preserve mrsId if synced from MRS)
+      upserted = await prisma.provider.update({
+        where: { id: existing.id },
+        data: { specialty: provider.specialty },
+      });
+      console.log(`  ✓ Provider (existing): ${upserted.name} (mrsId: ${upserted.mrsId ?? 'local'})`);
+    } else {
+      // Create new local provider (no mrsId - will get one when synced to MRS)
+      upserted = await prisma.provider.create({
+        data: {
+          name: provider.name,
+          specialty: provider.specialty,
+          // mrsId is null - will be set when/if pushed to MRS
+        },
+      });
+      console.log(`  ✓ Provider (new local): ${upserted.name} (no mrsId - local only)`);
+    }
     providers.push(upserted);
-    console.log(`  ✓ Provider: ${upserted.name} (${upserted.mrsId})`);
   }
 
   return providers;
@@ -194,20 +212,38 @@ async function seedProviders() {
 async function seedServices() {
   console.log('\nSeeding services (appointment types)...');
 
-  const services: { id: string; name: string; mrsId: string }[] = [];
+  const services: { id: string; name: string; mrsId: string | null }[] = [];
 
   for (const service of testServices) {
-    const upserted = await prisma.appointmentType.upsert({
-      where: { mrsId: service.mrsId },
-      update: {
-        name: service.name,
-        durationMinutes: service.durationMinutes,
-        description: service.description,
-      },
-      create: service,
+    // Check if service already exists by name (could have been synced from MRS)
+    const existing = await prisma.appointmentType.findFirst({
+      where: { name: service.name },
     });
+
+    let upserted;
+    if (existing) {
+      // Update existing service (preserve mrsId if synced from MRS)
+      upserted = await prisma.appointmentType.update({
+        where: { id: existing.id },
+        data: {
+          durationMinutes: service.durationMinutes,
+          description: service.description,
+        },
+      });
+      console.log(`  ✓ Service (existing): ${upserted.name} (mrsId: ${upserted.mrsId ?? 'local'})`);
+    } else {
+      // Create new local service (no mrsId - will get one when synced to MRS)
+      upserted = await prisma.appointmentType.create({
+        data: {
+          name: service.name,
+          durationMinutes: service.durationMinutes,
+          description: service.description,
+          // mrsId is null - will be set when/if pushed to MRS
+        },
+      });
+      console.log(`  ✓ Service (new local): ${upserted.name} (no mrsId - local only)`);
+    }
     services.push(upserted);
-    console.log(`  ✓ Service: ${upserted.name} (${upserted.mrsId})`);
   }
 
   return services;
@@ -251,12 +287,12 @@ async function upsertScheduleTemplate(
 }
 
 async function seedScheduleTemplates(
-  providers: { id: string; name: string; mrsId: string }[]
+  providers: { id: string; name: string; mrsId: string | null }[]
 ) {
   console.log('\nSeeding schedule templates...');
 
-  const drSmith = providers.find(p => p.mrsId === 'test-provider-001');
-  const drJones = providers.find(p => p.mrsId === 'test-provider-002');
+  const drSmith = providers.find(p => p.name === 'Dr. Smith');
+  const drJones = providers.find(p => p.name === 'Dr. Jones');
 
   if (!drSmith || !drJones) {
     console.log('  ⚠ Providers not found, skipping schedule templates');

@@ -15,7 +15,7 @@ datasource db {
 
 model Patient {
   id         String   @id @default(uuid())
-  mrsId      String   @unique @map("mrs_id") // OpenMRS patient UUID
+  mrsId      String?  @unique @map("mrs_id") // OpenMRS patient UUID (null until synced to MRS)
   name       String
   givenName  String?  @map("given_name")
   familyName String?  @map("family_name")
@@ -54,7 +54,7 @@ model PatientPhone {
 
 model Provider {
   id        String   @id @default(uuid())
-  mrsId     String   @unique @map("mrs_id") // OpenMRS provider UUID
+  mrsId     String?  @unique @map("mrs_id") // OpenMRS provider UUID (null for local-only)
   name      String
   specialty String?
   createdAt DateTime @default(now()) @map("created_at")
@@ -70,7 +70,7 @@ model Provider {
 
 model Location {
   id        String   @id @default(uuid())
-  mrsId     String   @unique @map("mrs_id") // OpenMRS location UUID
+  mrsId     String?  @unique @map("mrs_id") // OpenMRS location UUID (null for local-only)
   name      String
   address   String?
   createdAt DateTime @default(now()) @map("created_at")
@@ -83,7 +83,7 @@ model Location {
 
 model AppointmentType {
   id              String  @id @default(uuid())
-  mrsId           String  @unique @map("mrs_id")
+  mrsId           String? @unique @map("mrs_id") // OpenMRS service UUID (null for local-only)
   name            String
   durationMinutes Int?    @map("duration_minutes")
   description     String?
