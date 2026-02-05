@@ -1,6 +1,6 @@
 import { prisma } from '../../db/client.js';
 import { parseDate, parseTime, formatTimeForSpeech, formatDateForSpeech } from '../../utils/date.js';
-import { bookAppointmentByDatetime, cancelAppointment, type BookingResult } from '../../scheduling/index.js';
+import { bookAppointmentByDatetime, cancelAppointment } from '../../scheduling/index.js';
 import type { MRSAdapter } from '../../mrs/adapter.js';
 import { getSuggestedAvailability, type SuggestedAvailability } from './suggested-availability.js';
 
@@ -48,7 +48,7 @@ export async function rescheduleAppointment(
     },
   });
 
-  if (!existingAppointment || !existingAppointment.provider || !existingAppointment.service || !existingAppointment.providerId || !existingAppointment.serviceId) {
+  if (!existingAppointment || !existingAppointment.provider || !existingAppointment.providerId) {
     return {
       success: false,
       message: "I couldn't find that appointment. Could you tell me which appointment you'd like to reschedule?",
@@ -58,9 +58,33 @@ export async function rescheduleAppointment(
 
   // Narrow types after null checks
   const originalProviderId = existingAppointment.providerId;
-  const originalServiceId = existingAppointment.serviceId;
   const originalProvider = existingAppointment.provider;
   const originalService = existingAppointment.service;
+
+  // Service may be null for appointments synced from MRS - find a default if needed
+  let originalServiceId = existingAppointment.serviceId;
+  if (!originalServiceId) {
+    // Try to find a general/default service, or just use any available one
+    const defaultService = await prisma.appointmentType.findFirst({
+      where: {
+        OR: [
+          { name: { contains: 'General', mode: 'insensitive' } },
+          { name: { contains: 'Checkup', mode: 'insensitive' } },
+        ],
+      },
+    }) ?? await prisma.appointmentType.findFirst();
+
+    if (!defaultService) {
+      // This shouldn't happen if the system is set up correctly
+      console.error('[Reschedule] No appointment types found in database');
+      return {
+        success: false,
+        message: "I'm having trouble rescheduling right now. Would you like to cancel this appointment and book a new one instead?",
+        error: 'no_services_available',
+      };
+    }
+    originalServiceId = defaultService.id;
+  }
 
   if (existingAppointment.status === 'cancelled') {
     return {
@@ -140,7 +164,7 @@ export async function rescheduleAppointment(
     const errorMessages: Record<string, string> = {
       conflict: 'That time slot isn\'t available.',
       outside_schedule: 'That time is outside our available hours.',
-      validation_error: 'There was an issue with the rescheduling.',
+      validation_error: 'I couldn\'t reschedule to that time.',
     };
 
     const baseMessage = bookingResult.error ? errorMessages[bookingResult.error] || bookingResult.message : bookingResult.message;
@@ -183,7 +207,7 @@ export async function rescheduleAppointment(
       date: dateStr,
       time: timeStr,
       provider: isProviderKnown ? providerNameForMessage : '',
-      service: originalService.name,
+      service: originalService?.name ?? '',
     },
     message: confirmationMessage,
   };

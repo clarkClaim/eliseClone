@@ -8,6 +8,7 @@ import { MRSError } from '../mrs/errors.js';
 import { syncScheduleTemplates } from './entities/schedule-templates.js';
 import { processPushJobs } from './push/appointment-push.js';
 import { processCancellationJobs } from './push/cancellation-push.js';
+import { log } from '../utils/logger.js';
 
 const DEFAULT_SYNC_INTERVAL_MS = 300000; // 5 minutes
 const DEFAULT_MAX_REQUESTS_PER_CYCLE = 20; // Leave bandwidth for real-time ops
@@ -144,13 +145,13 @@ export class SyncService {
       // This handles both datetime-based (new) and slot-based (legacy) appointments
       const jobsProcessed = await processPushJobs(this.adapter);
       if (jobsProcessed > 0) {
-        console.log(`[Sync] Processed ${jobsProcessed} appointment push jobs`);
+        log.sync.info('Processed appointment push jobs', { count: jobsProcessed });
       }
 
       // Process queued cancellation push jobs
       const cancellationsProcessed = await processCancellationJobs(this.adapter);
       if (cancellationsProcessed > 0) {
-        console.log(`[Sync] Processed ${cancellationsProcessed} cancellation push jobs`);
+        log.sync.info('Processed cancellation push jobs', { count: cancellationsProcessed });
       }
 
       const duration = Date.now() - startTime;
@@ -545,6 +546,16 @@ export class SyncService {
     });
 
     if (existingAppt) {
+      // Skip if local has pending changes (syncedToMrs = false) - local takes precedence
+      if (!existingAppt.syncedToMrs) {
+        log.sync.info('Skipping appointment - has pending local changes', {
+          appointmentId: existingAppt.id,
+          localStatus: existingAppt.status,
+          mrsStatus: appt.status,
+        });
+        return;
+      }
+
       // Check for data divergence
       if (existingAppt.status !== appt.status) {
         await this.logConflict({
@@ -558,7 +569,7 @@ export class SyncService {
         });
       }
 
-      // MRS wins for status
+      // MRS wins for status (only if no pending local changes)
       await prisma.appointment.update({
         where: { mrsId: appt.mrsId },
         data: {

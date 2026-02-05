@@ -6,6 +6,7 @@ import { rescheduleAppointment, RescheduleAppointmentParams, setMRSAdapterForRes
 import { cancelAppointmentTool, CancelAppointmentParams, setMRSAdapterForCancel } from './cancel-appointment.js';
 import { manageAppointment, ManageAppointmentParams, setMRSAdapterForManage } from './manage-appointment.js';
 import type { MRSAdapter } from '../../mrs/adapter.js';
+import { log } from '../../utils/logger.js';
 
 // Set MRS adapter for all tools that need it
 export function setMRSAdapter(adapter: MRSAdapter | null): void {
@@ -90,13 +91,14 @@ export async function handleToolCall(request: VapiToolCallRequest): Promise<Vapi
   const callerPhone = request.message.call?.customer?.number;
   const toolCalls = request.message.toolCallList || [];
 
-  console.log(`[Tools] Call ID: ${callId}, Caller phone: ${callerPhone}`);
+  log.tools.info('Tool call received', { callId, callerPhone, toolCount: toolCalls.length });
 
   for (const toolCall of toolCalls) {
     const { id: toolCallId, function: fn } = toolCall;
     const handler = tools[fn.name];
 
     if (!handler) {
+      log.tools.warn('Unknown tool requested', { tool: fn.name });
       results.push({
         toolCallId,
         result: JSON.stringify({
@@ -110,26 +112,31 @@ export async function handleToolCall(request: VapiToolCallRequest): Promise<Vapi
     let args = { ...fn.arguments };
     if (TOOLS_NEEDING_CALLER_PHONE.includes(fn.name) && callerPhone) {
       // Use caller ID as default, but LLM-provided phone overrides if present
-      if (args.phone) {
-        console.log(`[Tools] LLM provided phone for ${fn.name}: ${args.phone} (caller ID: ${callerPhone})`);
-      } else {
+      if (!args.phone) {
         args.phone = callerPhone;
-        console.log(`[Tools] Using caller ID phone for ${fn.name}: ${callerPhone}`);
       }
     }
 
+    log.tools.debug('Executing tool', { tool: fn.name, args });
+
     try {
       const result = await handler(args, callId);
+      // Log actual success status from tool result (if available)
+      const resultSuccess = typeof result === 'object' && result !== null && 'success' in result
+        ? (result as { success: boolean }).success
+        : true;
+      log.tools.info('Tool completed', { tool: fn.name, success: resultSuccess });
       results.push({
         toolCallId,
         result: JSON.stringify(result),
       });
     } catch (error) {
-      console.error(`[Tools] Error in ${fn.name}:`, error);
+      const errorMessage = (error as Error).message;
+      log.tools.error('Tool failed', { tool: fn.name, error: errorMessage });
       results.push({
         toolCallId,
         result: JSON.stringify({
-          error: `Tool execution failed: ${(error as Error).message}`,
+          error: `Tool execution failed: ${errorMessage}`,
         }),
       });
     }

@@ -55,6 +55,7 @@ pnpm run vapi:assign "Elise - Maple Grove Medical" OpenMRS
 
 ### 1. Get the logs first
 
+**VAPI call logs** (what the LLM said/did):
 ```bash
 pnpm run vapi:logs --last
 ```
@@ -64,6 +65,19 @@ Look for:
 - **Tool errors**: Check TOOL_RESULT for error messages
 - **Missing speech**: If BOT never mentions something, check if data is in TOOL_RESULT
 - **Wrong tool called**: LLM might be using wrong tool or wrong params
+
+**Server-side logs** (what our tools/sync did):
+```bash
+# Logs are written to logs/elise-YYYY-MM-DD.log
+tail -f logs/elise-*.log           # Watch live
+cat logs/elise-2026-02-05.log      # Read specific day
+
+# Or search for specific events
+grep "cancel_appointment" logs/elise-*.log
+grep "Skipping appointment" logs/elise-*.log  # Sync skipped due to pending local changes
+```
+
+Server logs show: tool execution, sync decisions, MRS push results, errors with full context.
 
 ### 2. Identify the issue type
 
@@ -127,6 +141,24 @@ This removes the need for a second tool call.
 - After any .ts change, run `pnpm run build`
 - After any config change, run `pnpm run vapi:setup`
 - Test with an actual call, not just code review
+
+---
+
+## Log Configuration
+
+Server logs are enabled by default. Configure via environment:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `LOG_TO_FILE` | `true` | Set `false` to disable file logging |
+| `LOG_DIR` | `logs` | Directory for log files |
+| `PRISMA_LOG_QUERIES` | `false` | Set `true` to see SQL queries (very verbose) |
+
+```bash
+# Enable debug logging for more detail
+LOG_LEVEL=debug pnpm run dev
+```
 
 ---
 

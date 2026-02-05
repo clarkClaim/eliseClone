@@ -19,9 +19,15 @@ function createPrismaClient(): PrismaClient {
 
   const adapter = new PrismaPg({ connectionString });
 
+  // Prisma query logs are noisy - enable with PRISMA_LOG_QUERIES=true
+  const logQueries = process.env.PRISMA_LOG_QUERIES === 'true';
+  const logConfig: ('query' | 'error' | 'warn')[] = logQueries
+    ? ['query', 'error', 'warn']
+    : ['error', 'warn'];
+
   return new PrismaClient({
     adapter,
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    log: logConfig,
   });
 }
 

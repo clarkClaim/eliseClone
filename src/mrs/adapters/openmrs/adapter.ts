@@ -547,7 +547,7 @@ export class OpenMRSAdapter implements MRSAdapter {
       throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
     }
 
-    // Verify appointment exists
+    // Verify appointment exists and get required fields
     const existing = await this.client.getAppointmentByUuid<BahmniAppointmentResponse>(mrsId);
 
     if (!existing) {
@@ -555,9 +555,12 @@ export class OpenMRSAdapter implements MRSAdapter {
     }
 
     // Update status to Cancelled (Bahmni uses PascalCase)
+    // Bahmni requires appointmentKind and serviceUuid for all updates
     await this.client.updateBahmniAppointment(mrsId, {
       status: 'Cancelled',
       comments: reason,
+      appointmentKind: existing.appointmentKind ?? 'Scheduled',
+      serviceUuid: existing.service?.uuid,
     });
   }
 
@@ -566,7 +569,7 @@ export class OpenMRSAdapter implements MRSAdapter {
       throw new MRSValidationError('Appointment scheduling module not available on this OpenMRS instance');
     }
 
-    // Verify appointment exists
+    // Verify appointment exists and get required fields
     const existing = await this.client.getAppointmentByUuid<BahmniAppointmentResponse>(mrsId);
 
     if (!existing) {
@@ -576,8 +579,11 @@ export class OpenMRSAdapter implements MRSAdapter {
     // Map to Bahmni status (PascalCase)
     const bahmniStatus = BAHMNI_REVERSE_STATUS_MAP[status] ?? status;
 
+    // Bahmni requires appointmentKind and serviceUuid for all updates
     await this.client.updateBahmniAppointment(mrsId, {
       status: bahmniStatus,
+      appointmentKind: existing.appointmentKind ?? 'Scheduled',
+      serviceUuid: existing.service?.uuid,
     });
   }
 

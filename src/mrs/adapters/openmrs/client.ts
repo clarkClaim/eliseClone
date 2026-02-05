@@ -135,12 +135,15 @@ export class OpenMRSClient {
   /**
    * Update an appointment (Bahmni).
    * Used for status changes, cancellation, etc.
+   * Bahmni requires certain fields (like appointmentKind, serviceUuid) even for updates.
    */
   async updateBahmniAppointment<T>(uuid: string, updates: {
     status?: string;
     comments?: string;
+    appointmentKind?: string;
+    serviceUuid?: string;
   }): Promise<T> {
-    // Bahmni requires sending the full appointment with uuid for updates
+    // Bahmni requires appointmentKind and serviceUuid for all appointment operations
     return this.post<T>('/appointment', { uuid, ...updates });
   }
 

@@ -1,6 +1,6 @@
 import { prisma } from '../../db/client.js';
 import { parseDate, parseTime, formatTimeForSpeech, formatDateForSpeech } from '../../utils/date.js';
-import { bookAppointmentByDatetime, isWithinSchedule, type BookingResult } from '../../scheduling/index.js';
+import { bookAppointmentByDatetime, isWithinSchedule } from '../../scheduling/index.js';
 import type { MRSAdapter } from '../../mrs/adapter.js';
 
 export interface BookAppointmentParams {
