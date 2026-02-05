@@ -1,8 +1,12 @@
 # Elise Clone
 
-AI-powered healthcare scheduling assistant with voice and chat interfaces.
+AI-powered healthcare scheduling assistant!
 
 A demo implementation inspired by [EliseAI Health](https://eliseai.com/health), focused on patient appointment scheduling through natural conversation.
+
+## Quickstart
+
+Call 667-677-9143 to make an appointment!
 
 ## Overview
 
@@ -24,7 +28,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 │   └─────────────┘  │                   │      - Tool orchestration        │ │
 │                    │   ┌───────────┐   │      - Session management        │ │
 │   ┌─────────────┐  ├──▶│  Channel  │──▶├──────────────────────────────────┤ │
-│   │   Chat      │  │   │  Adapters │   │  [2] Scheduling Tools            │ │
+│   │ Chat (todo) │  │   │  Adapters │   │  [2] Scheduling Tools            │ │
 │   │   (Web)     │──┘   └───────────┘   │      - Check availability        │ │
 │   └─────────────┘                      │      - Book appointment          │ │
 │                                        │      - Cancel/reschedule         │ │
@@ -33,7 +37,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 │   ==========                           │  [3] Context Store (PostgreSQL)  │ │
 │                                        │      - Patient profiles          │ │
 │   ┌──────────────────────────────────┐ │      - Availability cache        │ │
-│   │  [4] MRS Adapter Layer           │ │      - Appointment state         │ │
+│   │  [4] EHS Adapter Layer           │ │      - Appointment state         │ │
 │   │      (Abstract interface)        │ │      - Waitlist entries          │ │
 │   ├──────────────────────────────────┤ │      - Job queue                 │ │
 │   │  [5] OpenMRS Integration         │ └──────────────────────────────────┘ │
@@ -49,14 +53,14 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 │   └──────────────────────────────────┘  └────────────────────────────────┘  │
 │                                                                             │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │  [7] Waitlist Scheduler                                              │  │
+│   │  [7] Waitlist Scheduler  (TODO)                                      │  │
 │   │      - Monitors for cancellations                                    │  │
 │   │      - Triggers outbound calls to waitlisted patients                │  │
 │   │      - Configurable rules (time buffer, priority, etc.)              │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │  [BACKLOG] Admin UI                                                  │  │
+│   │   Admin UI (TODO)                                                    │  │
 │   │      - View agent conversations                                      │  │
 │   │      - Manage appointments                                           │  │
 │   │      - Monitor system health                                         │  │
@@ -72,6 +76,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 **Purpose:** Unified conversation engine powering both voice and chat interfaces.
 
 **Responsibilities:**
+
 - Manage conversation state and context
 - Orchestrate tool calls (scheduling, lookups, etc.)
 - Handle multi-turn dialogues naturally
@@ -88,6 +93,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 **Purpose:** Tool definitions that the agent uses to perform scheduling actions.
 
 **Responsibilities:**
+
 - `check_availability` - Query open slots for a provider/date range
 - `book_appointment` - Reserve a slot for a patient
 - `cancel_appointment` - Cancel and optionally add to waitlist
@@ -106,6 +112,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 **Purpose:** PostgreSQL database serving as the real-time operational store.
 
 **Responsibilities:**
+
 - Cache patient profiles synced from MRS
 - Store computed availability (provider × timeslot matrix)
 - Track appointment lifecycle (booked → confirmed → completed/cancelled)
@@ -117,6 +124,7 @@ This system automates patient scheduling conversations over **voice** (via VAPI)
 **Key Design:** "Postgres for everything" — context, cache, and job queue in one database. Uses `pg_notify` + polling for job processing, avoiding additional infrastructure.
 
 **Tables (conceptual):**
+
 ```
 patients          - Synced patient profiles
 providers         - Synced provider info
@@ -134,6 +142,7 @@ sync_state        - Last sync timestamps per entity type
 **Purpose:** Abstract interface for medical record system integration with capability discovery.
 
 **Responsibilities:**
+
 - Define standard operations (fetch patients, fetch providers, fetch/create appointments)
 - Handle authentication per MRS type
 - Transform MRS-specific data into canonical format
@@ -179,6 +188,7 @@ interface MRSAdapter {
 **Purpose:** Concrete MRS adapter implementation for OpenMRS.
 
 **Responsibilities:**
+
 - Implement MRSAdapter interface for OpenMRS REST API
 - Handle OpenMRS authentication (basic auth or OAuth)
 - Map OpenMRS data structures to canonical format
@@ -187,6 +197,7 @@ interface MRSAdapter {
 **Dependencies:** MRS Adapter Layer, OpenMRS Demo instance
 
 **Configuration:**
+
 ```
 OPENMRS_URL=https://o3.openmrs.org/openmrs
 OPENMRS_USER=admin
@@ -202,6 +213,7 @@ OPENMRS_PASSWORD=Admin123
 **Purpose:** Keep Context Store synchronized with MRS data with intelligent rate limiting.
 
 **Responsibilities:**
+
 - Poll MRS for changes on configurable intervals per entity type
 - Detect and sync new/updated patients, providers, appointments
 - Recompute availability after appointment changes
@@ -215,6 +227,7 @@ OPENMRS_PASSWORD=Admin123
 **Key Design:** Polling-based with adaptive intervals. During live booking calls, the system uses MRS-first booking (verify slot → create in MRS → record locally). Background sync keeps data fresh and handles the push queue for appointments created during MRS outages.
 
 **Sync Flow:**
+
 ```
 1. Check rate limit state (back off if needed)
 2. Fetch records from MRS
@@ -226,15 +239,19 @@ OPENMRS_PASSWORD=Admin123
 ```
 
 **Default Sync Intervals:**
-| Entity | Interval | Priority | Rationale |
-|--------|----------|----------|-----------|
-| Availability | 5 min | High | Freshness critical for booking |
-| Appointments | 5 min | High | Detect external changes |
-| Patients | 30 min | Medium | Less volatile data |
-| Providers | 60 min | Low | Rarely changes |
-| Locations | 60 min | Low | Rarely changes |
+
+
+| Entity       | Interval | Priority | Rationale                      |
+| ------------ | -------- | -------- | ------------------------------ |
+| Availability | 5 min    | High     | Freshness critical for booking |
+| Appointments | 5 min    | High     | Detect external changes        |
+| Patients     | 30 min   | Medium   | Less volatile data             |
+| Providers    | 60 min   | Low      | Rarely changes                 |
+| Locations    | 60 min   | Low      | Rarely changes                 |
+
 
 **Conflict Resolution:**
+
 - Patient/Provider data: MRS wins (source of truth)
 - Appointments in MRS but not local: Import
 - Appointments local but not in MRS: Flag for review (SyncConflict table)
@@ -242,6 +259,7 @@ OPENMRS_PASSWORD=Admin123
 - Slots deleted in MRS: Mark `mrsExists=false`, prevent new bookings
 
 **Rate Limiting:**
+
 - Tracks `rateLimitRemaining` and `rateLimitResetAt` per sync state
 - Exponential backoff on consecutive failures
 - Adaptive interval adjustment when quota is low (<20%)
@@ -257,6 +275,7 @@ OPENMRS_PASSWORD=Admin123
 **Purpose:** Proactively fill cancelled appointments from waitlist.
 
 **Responsibilities:**
+
 - Monitor for appointment cancellations
 - Match cancelled slots against waitlist entries
 - Trigger outbound calls via VAPI to offer slots
@@ -266,11 +285,13 @@ OPENMRS_PASSWORD=Admin123
 **Dependencies:** Context Store, Agent Core (for outbound calls)
 
 **Trigger Conditions:**
+
 - Direct trigger when appointment cancelled (if within rules)
 - Periodic scan for unfilled slots approaching deadline
 - Manual trigger from admin (future)
 
 **Rules Engine:**
+
 ```
 - min_notice_hours: 24      # Don't offer slots less than 24h away
 - max_attempts: 3           # Try up to 3 waitlist patients per slot
@@ -285,6 +306,7 @@ OPENMRS_PASSWORD=Admin123
 **Purpose:** Internal dashboard for operations staff.
 
 **Planned Features:**
+
 - View real-time agent conversations
 - Browse/search appointments
 - Manage waitlist manually
@@ -297,15 +319,17 @@ OPENMRS_PASSWORD=Admin123
 
 ## Technology Stack
 
-| Component | Technology | Rationale |
-|-----------|------------|-----------|
-| **Language** | TypeScript/Node.js | Consistency across stack, VAPI SDK support |
-| **Database** | PostgreSQL | One DB for everything: data, cache, job queue |
-| **Job Queue** | PostgreSQL | `pg_notify` + polling table, no extra infra |
-| **Voice AI** | VAPI | Purpose-built for voice agents, good docs |
-| **MRS** | OpenMRS (demo) | Open source, REST API, public demo available |
-| **Deployment** | Fly.io | Simple deploy, good free tier, scales well |
-| **Container** | Docker | Local dev + deployment parity |
+
+| Component      | Technology         | Rationale                                     |
+| -------------- | ------------------ | --------------------------------------------- |
+| **Language**   | TypeScript/Node.js | Consistency across stack, VAPI SDK support    |
+| **Database**   | PostgreSQL         | One DB for everything: data, cache, job queue |
+| **Job Queue**  | PostgreSQL         | `pg_notify` + polling table, no extra infra   |
+| **Voice AI**   | VAPI               | Purpose-built for voice agents, good docs     |
+| **MRS**        | OpenMRS (demo)     | Open source, REST API, public demo available  |
+| **Deployment** | Fly.io             | Simple deploy, good free tier, scales well    |
+| **Container**  | Docker             | Local dev + deployment parity                 |
+
 
 ### "Postgres for Everything" Philosophy
 
@@ -317,6 +341,7 @@ Rather than introducing Redis for caching and Bull for job queues, we use Postgr
 4. **Fewer moving parts** — Reduces deployment complexity
 
 The job queue uses a simple pattern:
+
 ```sql
 -- Jobs table with status
 CREATE TABLE jobs (
@@ -381,10 +406,12 @@ pnpm run dev
 
 Elise uses a profile system to support multiple MRS backends. Set `PROFILE` in your `.env`:
 
-| Profile | MRS | Server Port | DB Port |
-|---------|-----|-------------|---------|
-| `mrs` | OpenMRS | 3000 | 5432 |
-| `emr` | OpenEMR | 3001 | 5433 |
+
+| Profile | MRS     | Server Port | DB Port |
+| ------- | ------- | ----------- | ------- |
+| `mrs`   | OpenMRS | 3000        | 5432    |
+| `emr`   | OpenEMR | 3001        | 5433    |
+
 
 Profile-specific configs are in `config/profiles/`. For running multiple offices simultaneously, see [Multi-Office Setup](docs/MULTI_OFFICE_SETUP.md).
 
@@ -444,43 +471,51 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### Core Settings
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PROFILE` | Yes | MRS profile: `mrs` (OpenMRS) or `emr` (OpenEMR) |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `VAPI_API_KEY` | Yes | VAPI API key for voice |
-| `VAPI_ASSISTANT_ID` | Yes | VAPI assistant ID (configure in dashboard) |
-| `PORT` | No | Server port (loaded from profile config) |
+
+| Variable            | Required | Description                                     |
+| ------------------- | -------- | ----------------------------------------------- |
+| `PROFILE`           | Yes      | MRS profile: `mrs` (OpenMRS) or `emr` (OpenEMR) |
+| `DATABASE_URL`      | Yes      | PostgreSQL connection string                    |
+| `VAPI_API_KEY`      | Yes      | VAPI API key for voice                          |
+| `VAPI_ASSISTANT_ID` | Yes      | VAPI assistant ID (configure in dashboard)      |
+| `PORT`              | No       | Server port (loaded from profile config)        |
+
 
 Profile-specific settings (PORT, DB_PORT, MRS URLs, NGROK_DOMAIN) are loaded from `config/profiles/${PROFILE}.env`.
 
 ### MRS Integration
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENMRS_URL` | Yes | OpenMRS instance URL (e.g., `https://o3.openmrs.org/openmrs`) |
-| `OPENMRS_USER` | Yes | OpenMRS username |
-| `OPENMRS_PASSWORD` | Yes | OpenMRS password |
-| `OPENMRS_TIMEOUT_MS` | No | Request timeout (default: 30000) |
+
+| Variable             | Required | Description                                                   |
+| -------------------- | -------- | ------------------------------------------------------------- |
+| `OPENMRS_URL`        | Yes      | OpenMRS instance URL (e.g., `https://o3.openmrs.org/openmrs`) |
+| `OPENMRS_USER`       | Yes      | OpenMRS username                                              |
+| `OPENMRS_PASSWORD`   | Yes      | OpenMRS password                                              |
+| `OPENMRS_TIMEOUT_MS` | No       | Request timeout (default: 30000)                              |
+
 
 ### Sync Configuration
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SYNC_AVAILABILITY_INTERVAL_MS` | No | Availability sync interval (default: 300000 = 5 min) |
-| `SYNC_APPOINTMENTS_INTERVAL_MS` | No | Appointments sync interval (default: 300000 = 5 min) |
-| `SYNC_PATIENTS_INTERVAL_MS` | No | Patients sync interval (default: 1800000 = 30 min) |
-| `SYNC_PROVIDERS_INTERVAL_MS` | No | Providers sync interval (default: 3600000 = 60 min) |
-| `SYNC_LOCATIONS_INTERVAL_MS` | No | Locations sync interval (default: 3600000 = 60 min) |
-| `SYNC_FULL_SYNC_TIME` | No | Daily full sync time in 24h format (default: `02:00`) |
-| `SYNC_MAX_CONSECUTIVE_FAILURES` | No | Alert threshold for consecutive failures (default: 5) |
+
+| Variable                        | Required | Description                                           |
+| ------------------------------- | -------- | ----------------------------------------------------- |
+| `SYNC_AVAILABILITY_INTERVAL_MS` | No       | Availability sync interval (default: 300000 = 5 min)  |
+| `SYNC_APPOINTMENTS_INTERVAL_MS` | No       | Appointments sync interval (default: 300000 = 5 min)  |
+| `SYNC_PATIENTS_INTERVAL_MS`     | No       | Patients sync interval (default: 1800000 = 30 min)    |
+| `SYNC_PROVIDERS_INTERVAL_MS`    | No       | Providers sync interval (default: 3600000 = 60 min)   |
+| `SYNC_LOCATIONS_INTERVAL_MS`    | No       | Locations sync interval (default: 3600000 = 60 min)   |
+| `SYNC_FULL_SYNC_TIME`           | No       | Daily full sync time in 24h format (default: `02:00`) |
+| `SYNC_MAX_CONSECUTIVE_FAILURES` | No       | Alert threshold for consecutive failures (default: 5) |
+
 
 ### Booking Configuration
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `BOOKING_STALE_THRESHOLD_MS` | No | When to warn about stale availability (default: 600000 = 10 min) |
-| `BOOKING_MAX_ALTERNATIVES` | No | Max alternative slots to suggest on conflict (default: 3) |
+
+| Variable                     | Required | Description                                                      |
+| ---------------------------- | -------- | ---------------------------------------------------------------- |
+| `BOOKING_STALE_THRESHOLD_MS` | No       | When to warn about stale availability (default: 600000 = 10 min) |
+| `BOOKING_MAX_ALTERNATIVES`   | No       | Max alternative slots to suggest on conflict (default: 3)        |
+
 
 See `.env.example` for a complete template.
 
