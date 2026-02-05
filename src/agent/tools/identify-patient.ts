@@ -1,6 +1,7 @@
 import { prisma } from '../../db/client.js';
 import { normalizePhone } from '../../utils/phone.js';
-import { parseDate, isSameDate } from '../../utils/date.js';
+import { parseDate, isSameDate, formatDateForSpeech, formatTimeForSpeech } from '../../utils/date.js';
+import { searchAvailability } from '../../scheduling/index.js';
 
 export interface IdentifyPatientParams {
   phone: string;
@@ -14,6 +15,21 @@ export type IdentifyPatientStatus =
   | 'not_found_try_name'
   | 'verification_failed';
 
+export interface UpcomingAppointment {
+  id: string;
+  dateForSpeech: string;
+  timeForSpeech: string;
+  providerName: string;
+  serviceName: string;
+  highlight: boolean;
+}
+
+export interface SuggestedSlot {
+  dateForSpeech: string;
+  timeForSpeech: string;
+  providerName: string;
+}
+
 export interface IdentifyPatientResult {
   status: IdentifyPatientStatus;
   patient?: {
@@ -23,6 +39,103 @@ export interface IdentifyPatientResult {
   };
   phoneAdded?: boolean;
   message?: string;
+  upcomingAppointments?: UpcomingAppointment[];
+  /** Guides the assistant on what to do next */
+  nextAction?: 'discuss_appointments' | 'offer_scheduling' | 'ask_name' | 'register_new';
+  /** Pre-fetched availability when patient has no appointments (so assistant doesn't need to call get_availability) */
+  suggestedAvailability?: {
+    slots: SuggestedSlot[];
+    summary: string;
+  };
+}
+
+async function getUpcomingAppointments(patientId: string): Promise<UpcomingAppointment[]> {
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      patientId,
+      startTime: { gt: new Date() },
+      status: { notIn: ['cancelled', 'no_show'] },
+    },
+    include: {
+      provider: true,
+      service: true,
+    },
+    orderBy: { startTime: 'asc' },
+    take: 5,
+  });
+
+  return appointments.map((apt, index) => {
+    const providerName = apt.provider?.name?.toLowerCase().includes('unknown')
+      ? ''
+      : apt.provider?.name ?? '';
+
+    return {
+      id: apt.id,
+      dateForSpeech: formatDateForSpeech(apt.startTime),
+      timeForSpeech: formatTimeForSpeech(apt.startTime),
+      providerName,
+      serviceName: apt.service?.name ?? '',
+      highlight: index < 2,
+    };
+  });
+}
+
+/**
+ * Get a few suggested availability slots for patients with no upcoming appointments.
+ * This allows the assistant to offer scheduling without a separate get_availability call.
+ */
+async function getSuggestedAvailability(): Promise<{ slots: SuggestedSlot[]; summary: string }> {
+  const result = await searchAvailability({
+    startDate: new Date(),
+    maxDays: 14,
+    findFirst: false,
+  });
+
+  // Get provider names
+  const providerIds = new Set<string>();
+  for (const windows of result.availabilityByDate.values()) {
+    for (const w of windows) {
+      if (w.providerId) providerIds.add(w.providerId);
+    }
+  }
+  const providers = await prisma.provider.findMany({
+    where: { id: { in: [...providerIds] } },
+    select: { id: true, name: true },
+  });
+  const providerMap = new Map(providers.map(p => [p.id, p.name]));
+
+  // Take first 3 slots across different days for variety
+  const slots: SuggestedSlot[] = [];
+  const seenDates = new Set<string>();
+
+  for (const [isoDate, windows] of [...result.availabilityByDate.entries()].sort()) {
+    if (slots.length >= 3) break;
+    if (seenDates.has(isoDate)) continue;
+
+    const firstWindow = windows[0];
+    if (!firstWindow) continue;
+
+    const rawName = firstWindow.providerId ? providerMap.get(firstWindow.providerId) : undefined;
+    const providerName = rawName?.toLowerCase().includes('unknown') ? '' : rawName ?? '';
+
+    slots.push({
+      dateForSpeech: formatDateForSpeech(firstWindow.startTime),
+      timeForSpeech: formatTimeForSpeech(firstWindow.startTime),
+      providerName,
+    });
+    seenDates.add(isoDate);
+  }
+
+  if (slots.length === 0) {
+    return { slots: [], summary: 'No appointments are currently available. Please check back later.' };
+  }
+
+  const slotDescriptions = slots.map(s => `${s.dateForSpeech} at ${s.timeForSpeech}`);
+  const summary = slots.length === 1
+    ? `The next available appointment is ${slotDescriptions[0]}.`
+    : `I have openings on ${slotDescriptions.slice(0, -1).join(', ')} or ${slotDescriptions[slotDescriptions.length - 1]}.`;
+
+  return { slots, summary };
 }
 
 export async function identifyPatient(
@@ -71,21 +184,42 @@ export async function identifyPatient(
     if (patient.dob && isSameDate(patient.dob, parsedDob)) {
       // DOB matches - patient identified
       await updateConversationPatient(callId, patient.id);
+      const upcomingAppointments = await getUpcomingAppointments(patient.id);
 
-      return {
-        status: 'existing',
-        patient: {
-          id: patient.id,
-          name: patient.name,
-          givenName: patient.givenName,
-        },
-      };
+      // If patient has appointments, focus on those; otherwise, offer scheduling
+      if (upcomingAppointments.length > 0) {
+        return {
+          status: 'existing',
+          patient: {
+            id: patient.id,
+            name: patient.name,
+            givenName: patient.givenName,
+          },
+          upcomingAppointments,
+          nextAction: 'discuss_appointments',
+        };
+      } else {
+        // No appointments - pre-fetch availability so assistant can offer scheduling
+        const suggestedAvailability = await getSuggestedAvailability();
+        return {
+          status: 'existing',
+          patient: {
+            id: patient.id,
+            name: patient.name,
+            givenName: patient.givenName,
+          },
+          upcomingAppointments,
+          nextAction: 'offer_scheduling',
+          suggestedAvailability,
+        };
+      }
     } else {
       // DOB doesn't match - caller may be using someone else's phone
       // Fall back to name + DOB lookup
       return {
         status: 'not_found_try_name',
         message: 'I couldn\'t verify you by phone number. Could you please tell me your full name?',
+        nextAction: 'ask_name',
       };
     }
   }
@@ -98,21 +232,41 @@ export async function identifyPatient(
       // Found by name + DOB - add phone to their record
       const phoneAdded = await addPhoneToPatient(patient.id, normalizedPhone);
       await updateConversationPatient(callId, patient.id);
+      const upcomingAppointments = await getUpcomingAppointments(patient.id);
 
-      return {
-        status: 'existing',
-        patient: {
-          id: patient.id,
-          name: patient.name,
-          givenName: patient.givenName,
-        },
-        phoneAdded,
-      };
+      if (upcomingAppointments.length > 0) {
+        return {
+          status: 'existing',
+          patient: {
+            id: patient.id,
+            name: patient.name,
+            givenName: patient.givenName,
+          },
+          phoneAdded,
+          upcomingAppointments,
+          nextAction: 'discuss_appointments',
+        };
+      } else {
+        const suggestedAvailability = await getSuggestedAvailability();
+        return {
+          status: 'existing',
+          patient: {
+            id: patient.id,
+            name: patient.name,
+            givenName: patient.givenName,
+          },
+          phoneAdded,
+          upcomingAppointments,
+          nextAction: 'offer_scheduling',
+          suggestedAvailability,
+        };
+      }
     } else {
       // Name + DOB didn't match anyone - new patient
       return {
         status: 'new',
         message: 'No patient found with that name and date of birth.',
+        nextAction: 'register_new',
       };
     }
   }
@@ -121,6 +275,7 @@ export async function identifyPatient(
   return {
     status: 'not_found_try_name',
     message: 'I could not find that phone number in our system. Could you please tell me your full name so I can look you up?',
+    nextAction: 'ask_name',
   };
 }
 

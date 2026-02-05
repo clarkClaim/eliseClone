@@ -82,12 +82,13 @@ export async function detectDemoReset(
  * Get current record counts from the database.
  */
 export async function getCurrentRecordCounts(): Promise<Record<EntityType, number>> {
-  const [providers, patients, locations, availability, appointments] = await Promise.all([
+  const [providers, patients, locations, availability, appointments, appointment_types] = await Promise.all([
     prisma.provider.count(),
     prisma.patient.count(),
     prisma.location.count(),
     prisma.availability.count({ where: { mrsExists: true } }),
     prisma.appointment.count(),
+    prisma.appointmentType.count(),
   ]);
 
   return {
@@ -96,6 +97,7 @@ export async function getCurrentRecordCounts(): Promise<Record<EntityType, numbe
     locations,
     availability,
     appointments,
+    appointment_types,
   };
 }
 

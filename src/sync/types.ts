@@ -46,7 +46,7 @@
 /**
  * Entity types that can be synchronized with the MRS.
  */
-export type EntityType = 'patients' | 'providers' | 'locations' | 'availability' | 'appointments';
+export type EntityType = 'patients' | 'providers' | 'locations' | 'availability' | 'appointments' | 'appointment_types';
 
 /**
  * Sync priority levels affect scheduling order when rate-limited.
@@ -109,6 +109,7 @@ export const DEFAULT_SYNC_CONFIG: SyncSchedulerConfig = {
     patients: { intervalMs: 30 * 60 * 1000, priority: 'medium' },     // 30 minutes
     providers: { intervalMs: 60 * 60 * 1000, priority: 'low' },       // 60 minutes
     locations: { intervalMs: 60 * 60 * 1000, priority: 'low' },       // 60 minutes
+    appointment_types: { intervalMs: 60 * 60 * 1000, priority: 'low' }, // 60 minutes (rarely change)
   },
   maxConsecutiveFailures: 5,
   fullSyncTime: '02:00',

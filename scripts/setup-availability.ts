@@ -26,24 +26,32 @@ interface ScheduleTemplate {
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// Schedules for known providers
-const PROVIDER_SCHEDULES: Record<string, ScheduleTemplate[]> = {
-  // Match by partial name (case-insensitive)
-  'dr. jones': [
-    { dayOfWeek: 2, startTime: '08:00', endTime: '15:00' }, // Tuesday
-    { dayOfWeek: 4, startTime: '08:00', endTime: '15:00' }, // Thursday
-  ],
-  'dr. smith': [
-    { dayOfWeek: 1, startTime: '09:00', endTime: '17:00' }, // Monday
-    { dayOfWeek: 3, startTime: '09:00', endTime: '17:00' }, // Wednesday
-    { dayOfWeek: 5, startTime: '09:00', endTime: '17:00' }, // Friday
-  ],
+// Default schedule for all known providers (Mon-Fri 9am-5pm)
+const DEFAULT_SCHEDULE: ScheduleTemplate[] = [
+  { dayOfWeek: 1, startTime: '09:00', endTime: '17:00' }, // Monday
+  { dayOfWeek: 2, startTime: '09:00', endTime: '17:00' }, // Tuesday
+  { dayOfWeek: 3, startTime: '09:00', endTime: '17:00' }, // Wednesday
+  { dayOfWeek: 4, startTime: '09:00', endTime: '17:00' }, // Thursday
+  { dayOfWeek: 5, startTime: '09:00', endTime: '17:00' }, // Friday
+];
+
+// Role-specific schedule overrides (matched by partial name, case-insensitive)
+const ROLE_SCHEDULES: Record<string, ScheduleTemplate[]> = {
+  // Nurses work earlier hours
   'nurse': [
-    { dayOfWeek: 1, startTime: '08:00', endTime: '16:00' }, // Monday
-    { dayOfWeek: 2, startTime: '08:00', endTime: '16:00' }, // Tuesday
-    { dayOfWeek: 3, startTime: '08:00', endTime: '16:00' }, // Wednesday
-    { dayOfWeek: 4, startTime: '08:00', endTime: '16:00' }, // Thursday
-    { dayOfWeek: 5, startTime: '08:00', endTime: '16:00' }, // Friday
+    { dayOfWeek: 1, startTime: '08:00', endTime: '16:00' },
+    { dayOfWeek: 2, startTime: '08:00', endTime: '16:00' },
+    { dayOfWeek: 3, startTime: '08:00', endTime: '16:00' },
+    { dayOfWeek: 4, startTime: '08:00', endTime: '16:00' },
+    { dayOfWeek: 5, startTime: '08:00', endTime: '16:00' },
+  ],
+  // Technicians may have different hours
+  'technician': [
+    { dayOfWeek: 1, startTime: '08:00', endTime: '14:00' },
+    { dayOfWeek: 2, startTime: '08:00', endTime: '14:00' },
+    { dayOfWeek: 3, startTime: '08:00', endTime: '14:00' },
+    { dayOfWeek: 4, startTime: '08:00', endTime: '14:00' },
+    { dayOfWeek: 5, startTime: '08:00', endTime: '14:00' },
   ],
 };
 
@@ -52,14 +60,16 @@ function isKnownProvider(name: string): boolean {
   return !lower.includes('unknown') && !lower.includes('placeholder') && !lower.includes('admin');
 }
 
-function getScheduleForProvider(name: string): ScheduleTemplate[] | null {
+function getScheduleForProvider(name: string): ScheduleTemplate[] {
   const lower = name.toLowerCase();
-  for (const [key, schedule] of Object.entries(PROVIDER_SCHEDULES)) {
-    if (lower.includes(key)) {
+  // Check for role-specific schedules first
+  for (const [role, schedule] of Object.entries(ROLE_SCHEDULES)) {
+    if (lower.includes(role)) {
       return schedule;
     }
   }
-  return null;
+  // Fall back to default schedule for all other known providers
+  return DEFAULT_SCHEDULE;
 }
 
 async function listProviders(): Promise<void> {
@@ -111,12 +121,7 @@ async function createSchedules(): Promise<void> {
 
   for (const provider of providers) {
     if (!isKnownProvider(provider.name)) {
-      continue;
-    }
-
-    const schedule = getScheduleForProvider(provider.name);
-    if (!schedule) {
-      console.log(`⚠️  No schedule defined for: ${provider.name}`);
+      console.log(`⏭️  Skipping unknown/admin provider: ${provider.name}`);
       continue;
     }
 
@@ -125,6 +130,8 @@ async function createSchedules(): Promise<void> {
       console.log(`✓ ${provider.name} already has ${provider.scheduleTemplates.length} schedules`);
       continue;
     }
+
+    const schedule = getScheduleForProvider(provider.name);
 
     console.log(`Creating schedules for: ${provider.name}`);
 

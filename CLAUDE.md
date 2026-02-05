@@ -105,6 +105,7 @@ Located in `openspec/specs/`:
 | `docs/DESIGN_DECISIONS.md` | Architectural choices and rationale |
 | `docs/PHASE2_SYNC_CONSIDERATIONS.md` | Schema additions needed for MRS sync |
 | `docs/VAPI_SETUP.md` | Step-by-step VAPI configuration guide |
+| `docs/VAPI_REFERENCE.md` | VAPI behavior, tool patterns, debugging |
 | `docs/VOICE_IDEAS.md` | Voice provider options and recommendations |
 
 ## Tech Stack
@@ -124,6 +125,40 @@ pnpm run dev              # Start server with hot reload
 pnpm run build            # Compile TypeScript
 pnpm exec prisma studio   # Browse database
 pnpm exec prisma migrate dev  # Run migrations
+```
+
+## Database Access Patterns
+
+**Environment Loading:** All scripts should use the `loadEnv()` helper from `src/utils/env.js` which handles:
+- Loading `.env` for common settings
+- Loading profile-specific env from `config/profiles/<profile>.env` (e.g., `mrs.env`, `emr.env`)
+- The `PROFILE` env var determines which profile to load (defaults to `mrs`)
+
+**Running ad-hoc database scripts:**
+```bash
+# Wrap in async IIFE when using tsx -e
+pnpm exec tsx -e "
+(async () => {
+  const { loadEnv } = await import('./src/utils/env.js');
+  loadEnv();
+  // ... your code
+  process.exit(0);
+})();
+"
+```
+
+**Prisma Client Setup:** Uses driver adapters (Prisma 7+). Import from `src/db/client.js`:
+```typescript
+import { prisma } from '../../db/client.js';
+```
+
+## Data Setup Commands
+
+```bash
+pnpm run setup:availability           # List providers and their schedules
+pnpm run setup:availability --create  # Create default schedules for known providers
+pnpm run seed                         # Seed test patients
+pnpm run sync                         # Run MRS sync
 ```
 
 ## VAPI Commands

@@ -220,48 +220,57 @@ interface ServiceInfo {
 async function findService(serviceType?: string): Promise<ServiceInfo | null> {
   const DEFAULT_DURATION = 30;
 
+  // Get all services
+  const services = await prisma.appointmentType.findMany();
+  if (services.length === 0) {
+    return null;
+  }
+
   if (!serviceType) {
-    // Return default service (general checkup)
-    const service = await prisma.appointmentType.findFirst({
-      where: {
-        name: { contains: 'checkup', mode: 'insensitive' },
-      },
-    });
-    if (service) {
-      return { ...service, durationMinutes: service.durationMinutes ?? DEFAULT_DURATION };
-    }
-    const fallback = await prisma.appointmentType.findFirst();
-    return fallback ? { ...fallback, durationMinutes: fallback.durationMinutes ?? DEFAULT_DURATION } : null;
+    // Return default service - prefer "General Medicine" or "General" or first available
+    const generalService = services.find(s =>
+      s.name.toLowerCase().includes('general') ||
+      s.name.toLowerCase().includes('checkup')
+    );
+    const service = generalService || services[0];
+    return { ...service, durationMinutes: service.durationMinutes ?? DEFAULT_DURATION };
   }
 
   // Search by type (flexible matching)
   const normalizedType = serviceType.toLowerCase().trim();
-  const services = await prisma.appointmentType.findMany();
 
-  // Direct matches
+  // Keyword mappings - maps user terms to service name patterns
   const typeKeywords: Record<string, string[]> = {
-    checkup: ['checkup', 'check-up', 'general', 'annual', 'physical'],
-    followup: ['follow-up', 'followup', 'follow up', 'return'],
-    new: ['new patient', 'new', 'initial', 'consultation'],
+    // User might say "checkup" or "general checkup" - match to General Medicine
+    general: ['checkup', 'check-up', 'general', 'annual', 'physical', 'medicine'],
+    // User might say "follow-up" - match to Outpatient
+    outpatient: ['follow-up', 'followup', 'follow up', 'return', 'outpatient'],
+    // User might say "rehab" or "physical therapy"
+    rehabilitation: ['rehab', 'rehabilitation', 'therapy', 'pt'],
   };
 
   for (const service of services) {
     const serviceLower = service.name.toLowerCase();
 
-    // Exact match
+    // Direct match - service name contains what user said
     if (serviceLower.includes(normalizedType)) {
       return { ...service, durationMinutes: service.durationMinutes ?? DEFAULT_DURATION };
     }
 
-    // Keyword match
-    for (const [, keywords] of Object.entries(typeKeywords)) {
-      if (keywords.some(k => normalizedType.includes(k) && serviceLower.includes(k))) {
-        return { ...service, durationMinutes: service.durationMinutes ?? DEFAULT_DURATION };
+    // Check if what user said matches keywords for this service type
+    for (const [servicePattern, keywords] of Object.entries(typeKeywords)) {
+      // If service name matches the pattern (e.g., "General Medicine" contains "general")
+      if (serviceLower.includes(servicePattern)) {
+        // And user said one of the keywords for this service
+        if (keywords.some(k => normalizedType.includes(k))) {
+          return { ...service, durationMinutes: service.durationMinutes ?? DEFAULT_DURATION };
+        }
       }
     }
   }
 
-  return null;
+  // Fallback to first service if nothing matched
+  return { ...services[0], durationMinutes: services[0].durationMinutes ?? DEFAULT_DURATION };
 }
 
 async function updateConversationAppointment(callId: string, appointmentId: string): Promise<void> {

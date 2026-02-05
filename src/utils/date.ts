@@ -86,6 +86,21 @@ export function parseDate(input: string): Date | null {
     return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
   }
 
+  // Try "DayOfWeek, Month Day" format: "Monday, February 9"
+  const dayMonthMatch = trimmed.match(/^([a-z]+),?\s+([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?$/);
+  if (dayMonthMatch) {
+    const [, , monthStr, day] = dayMonthMatch;
+    const month = MONTHS[monthStr];
+    if (month !== undefined) {
+      const result = new Date(today.getFullYear(), month, parseInt(day));
+      // If date is in the past, use next year
+      if (result < today) {
+        result.setFullYear(result.getFullYear() + 1);
+      }
+      return result;
+    }
+  }
+
   // Try natural language: "March 5th", "March 5", "March 5, 2026"
   const naturalMatch = trimmed.match(/^([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})?$/);
   if (naturalMatch) {
