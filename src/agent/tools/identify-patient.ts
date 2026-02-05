@@ -1,6 +1,7 @@
 import { prisma } from '../../db/client.js';
 import { normalizePhone } from '../../utils/phone.js';
 import { parseDate, isSameDate, formatDateForSpeech, formatTimeForSpeech } from '../../utils/date.js';
+import { formatProviderNameForSpeech } from '../../utils/provider.js';
 import { getSuggestedAvailability, type SuggestedSlot } from './suggested-availability.js';
 
 export interface IdentifyPatientParams {
@@ -60,20 +61,14 @@ async function getUpcomingAppointments(patientId: string): Promise<UpcomingAppoi
     take: 5,
   });
 
-  return appointments.map((apt, index) => {
-    const providerName = apt.provider?.name?.toLowerCase().includes('unknown')
-      ? ''
-      : apt.provider?.name ?? '';
-
-    return {
-      id: apt.id,
-      dateForSpeech: formatDateForSpeech(apt.startTime),
-      timeForSpeech: formatTimeForSpeech(apt.startTime),
-      providerName,
-      serviceName: apt.service?.name ?? '',
-      highlight: index < 2,
-    };
-  });
+  return appointments.map((apt, index) => ({
+    id: apt.id,
+    dateForSpeech: formatDateForSpeech(apt.startTime),
+    timeForSpeech: formatTimeForSpeech(apt.startTime),
+    providerName: formatProviderNameForSpeech(apt.provider?.name),
+    serviceName: apt.service?.name ?? '',
+    highlight: index < 2,
+  }));
 }
 
 

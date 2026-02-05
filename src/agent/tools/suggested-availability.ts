@@ -1,5 +1,6 @@
 import { prisma } from '../../db/client.js';
 import { formatDateForSpeech, formatTimeForSpeech } from '../../utils/date.js';
+import { formatProviderNameForSpeech } from '../../utils/provider.js';
 import { searchAvailability } from '../../scheduling/index.js';
 import { isTimeInvalidated } from '../../scheduling/availability-cache.js';
 
@@ -55,12 +56,11 @@ export async function getSuggestedAvailability(): Promise<SuggestedAvailability>
     if (!firstWindow) continue;
 
     const rawName = firstWindow.providerId ? providerMap.get(firstWindow.providerId) : undefined;
-    const providerName = rawName?.toLowerCase().includes('unknown') ? '' : rawName ?? '';
 
     slots.push({
       dateForSpeech: formatDateForSpeech(firstWindow.startTime),
       timeForSpeech: formatTimeForSpeech(firstWindow.startTime),
-      providerName,
+      providerName: formatProviderNameForSpeech(rawName),
     });
     seenDates.add(isoDate);
   }

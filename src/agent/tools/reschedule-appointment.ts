@@ -1,5 +1,6 @@
 import { prisma } from '../../db/client.js';
 import { parseDate, parseTime, formatTimeForSpeech, formatDateForSpeech } from '../../utils/date.js';
+import { formatProviderNameForSpeech, isProviderKnown } from '../../utils/provider.js';
 import { bookAppointmentByDatetime, cancelAppointment } from '../../scheduling/index.js';
 import type { MRSAdapter } from '../../mrs/adapter.js';
 import { getSuggestedAvailability, type SuggestedAvailability } from './suggested-availability.js';
@@ -132,19 +133,20 @@ export async function rescheduleAppointment(
 
   // Determine provider - use new if specified, otherwise keep the same
   let providerId: string = originalProviderId;
-  let providerNameForMessage: string = originalProvider.name;
+  let rawProviderName: string = originalProvider.name;
 
   if (providerName) {
     const newProvider = await findProvider(providerName);
     if (!newProvider) {
+      const originalDisplayName = formatProviderNameForSpeech(originalProvider.name);
       return {
         success: false,
-        message: `I couldn't find a provider named ${providerName}. Would you like to keep your appointment with ${originalProvider.name}?`,
+        message: `I couldn't find a provider named ${providerName}. Would you like to keep your appointment with ${originalDisplayName || 'your current provider'}?`,
         error: 'provider_not_found',
       };
     }
     providerId = newProvider.id;
-    providerNameForMessage = newProvider.name;
+    rawProviderName = newProvider.name;
   }
 
   // Try to book the new slot first (before canceling the old one)
@@ -193,12 +195,11 @@ export async function rescheduleAppointment(
   const dateStr = formatDateForSpeech(newStartTime);
   const timeStr = formatTimeForSpeech(newStartTime);
 
-  // Check if provider name is known
-  const providerNameLower = providerNameForMessage.toLowerCase();
-  const isProviderKnown = !providerNameLower.includes('unknown') && !providerNameLower.includes('placeholder');
+  // Format provider name for natural speech
+  const providerDisplayName = formatProviderNameForSpeech(rawProviderName);
 
-  const confirmationMessage = isProviderKnown
-    ? `Done! I've moved your appointment to ${dateStr} at ${timeStr} with ${providerNameForMessage}. Is there anything else I can help you with?`
+  const confirmationMessage = providerDisplayName
+    ? `Done! I've moved your appointment to ${dateStr} at ${timeStr} with ${providerDisplayName}. Is there anything else I can help you with?`
     : `Done! I've moved your appointment to ${dateStr} at ${timeStr}. Is there anything else I can help you with?`;
 
   return {
@@ -206,7 +207,7 @@ export async function rescheduleAppointment(
     appointment: {
       date: dateStr,
       time: timeStr,
-      provider: isProviderKnown ? providerNameForMessage : '',
+      provider: providerDisplayName,
       service: originalService?.name ?? '',
     },
     message: confirmationMessage,
