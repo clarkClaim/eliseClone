@@ -1,0 +1,19 @@
+{
+  "_comment": "Test: Sarah - confident, warm, professional voice",
+  "profile": "mrs",
+  "template": {
+    "ASSISTANT_NAME": "Elise - Test Sarah",
+    "OFFICE_NAME": "Maple Grove Medical",
+    "OFFICE_INFO": "Primary care clinic open Monday-Friday 8am-5pm",
+    "FIRST_MESSAGE": "Hi there, this is Elise. May I have your date of birth?",
+    "STYLE_TONE": "Confident, warm, and professional"
+  },
+  "overrides": {
+    "voice": {
+      "provider": "11labs",
+      "voiceId": "EXAVITQu4vr4xnSDxMaL",
+      "stability": 0.45,
+      "similarityBoost": 0.75
+    }
+  }
+}

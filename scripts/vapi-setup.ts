@@ -225,12 +225,13 @@ async function createOrUpdateTool(apiKey: string, toolConfig: Record<string, unk
 async function createOrUpdateAssistant(
   apiKey: string,
   assistantConfig: Record<string, unknown>,
-  toolIds: string[]
+  toolIds: string[],
+  skipToolIds: boolean = false
 ): Promise<VapiAssistant> {
   const name = assistantConfig.name as string;
 
-  // Add tool IDs to the model config
-  if (toolIds.length > 0) {
+  // Add tool IDs to the model config (skip if --skip-tools to preserve existing)
+  if (!skipToolIds && toolIds.length > 0) {
     assistantConfig.model = assistantConfig.model || {};
     (assistantConfig.model as Record<string, unknown>).toolIds = toolIds;
   }
@@ -297,6 +298,7 @@ async function createOrUpdateAssistant(
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
+  const skipTools = args.includes('--skip-tools');
   const specificAssistant = args.find(a => !a.startsWith('--'));
 
   if (dryRun) {
@@ -330,9 +332,9 @@ async function main() {
   const configDir = join(__dirname, '..', 'config');
   const assistantsDir = join(configDir, 'assistants');
 
-  // Step 1: Create/update tools (skip in dry-run)
+  // Step 1: Create/update tools (skip in dry-run or with --skip-tools)
   const toolsMap: Map<string, string> = new Map(); // name -> id
-  if (!dryRun) {
+  if (!dryRun && !skipTools) {
     console.log('\n=== Setting up VAPI Tools ===\n');
 
     const toolFiles = readdirSync(configDir).filter(f => f.startsWith('vapi-tool-') && f.endsWith('.json'));
@@ -385,18 +387,20 @@ async function main() {
           console.log(JSON.stringify(assistantConfig, null, 2));
           console.log(`  --- End ${file} ---\n`);
         } else {
-          // Filter tools if toolFilter is specified
-          let assistantToolIds: string[];
-          if (toolFilter && toolFilter.length > 0) {
-            assistantToolIds = toolFilter
-              .map(name => toolsMap.get(name))
-              .filter((id): id is string => id !== undefined);
-            console.log(`    Using filtered tools: ${toolFilter.join(', ')}`);
-          } else {
-            assistantToolIds = [...toolsMap.values()];
+          // Filter tools if toolFilter is specified (skip if --skip-tools)
+          let assistantToolIds: string[] = [];
+          if (!skipTools) {
+            if (toolFilter && toolFilter.length > 0) {
+              assistantToolIds = toolFilter
+                .map(name => toolsMap.get(name))
+                .filter((id): id is string => id !== undefined);
+              console.log(`    Using filtered tools: ${toolFilter.join(', ')}`);
+            } else {
+              assistantToolIds = [...toolsMap.values()];
+            }
           }
 
-          const assistant = await createOrUpdateAssistant(apiKey!, assistantConfig, assistantToolIds);
+          const assistant = await createOrUpdateAssistant(apiKey!, assistantConfig, assistantToolIds, skipTools);
           createdAssistants.push({ assistant, profile });
 
           // Auto-update profile config with assistant ID

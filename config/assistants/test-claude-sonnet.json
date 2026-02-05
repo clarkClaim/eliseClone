@@ -5,13 +5,15 @@
     "ASSISTANT_NAME": "Elise - Test Claude Sonnet",
     "OFFICE_NAME": "Maple Grove Medical",
     "OFFICE_INFO": "Primary care clinic open Monday-Friday 8am-5pm",
-    "FIRST_MESSAGE": "Hi, this is Elise from Maple Grove Medical. May I have your date of birth?",
-    "STYLE_TONE": "Professional and helpful"
+    "FIRST_MESSAGE": "Hi there, this is Elise from Maple Grove Medical. May I have your date of birth?",
+    "STYLE_TONE": "Warm, caring, and conversational"
   },
   "overrides": {
     "voice": {
-      "provider": "deepgram",
-      "voiceId": "asteria"
+      "provider": "11labs",
+      "voiceId": "g6xIsTj2HwM6VR4iXFCw",
+      "stability": 0.45,
+      "similarityBoost": 0.75
     },
     "model": {
       "provider": "anthropic",

@@ -1,0 +1,19 @@
+{
+  "_comment": "Test: Matilda - warm, clear audiobook quality voice",
+  "profile": "mrs",
+  "template": {
+    "ASSISTANT_NAME": "Elise - Test Matilda",
+    "OFFICE_NAME": "Maple Grove Medical",
+    "OFFICE_INFO": "Primary care clinic open Monday-Friday 8am-5pm",
+    "FIRST_MESSAGE": "Hi there, this is Elise. May I have your date of birth?",
+    "STYLE_TONE": "Warm, clear, and professional"
+  },
+  "overrides": {
+    "voice": {
+      "provider": "11labs",
+      "voiceId": "XrExE9yKIg1WjnnlVkGX",
+      "stability": 0.45,
+      "similarityBoost": 0.75
+    }
+  }
+}

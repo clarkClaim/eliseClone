@@ -1,0 +1,19 @@
+{
+  "_comment": "Test: Jessica Anne with lower stability for more expressiveness (less robotic)",
+  "profile": "mrs",
+  "template": {
+    "ASSISTANT_NAME": "Elise - Test Jessica Warm",
+    "OFFICE_NAME": "Maple Grove Medical",
+    "OFFICE_INFO": "Primary care clinic open Monday-Friday 8am-5pm",
+    "FIRST_MESSAGE": "Hi there, this is Elise. May I have your date of birth?",
+    "STYLE_TONE": "Warm, caring, and natural"
+  },
+  "overrides": {
+    "voice": {
+      "provider": "11labs",
+      "voiceId": "g6xIsTj2HwM6VR4iXFCw",
+      "stability": 0.35,
+      "similarityBoost": 0.80
+    }
+  }
+}
