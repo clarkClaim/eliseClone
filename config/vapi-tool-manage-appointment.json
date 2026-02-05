@@ -1,0 +1,41 @@
+{
+  "type": "function",
+  "function": {
+    "name": "manage_appointment",
+    "description": "Manage appointments: book new ones, cancel existing ones, or reschedule. Use the 'action' parameter to specify what to do.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["book", "cancel", "reschedule"],
+          "description": "What to do: 'book' creates a new appointment, 'cancel' removes an existing one, 'reschedule' moves an existing appointment to a new time"
+        },
+        "appointmentId": {
+          "type": "string",
+          "description": "Required for cancel/reschedule: the ID of the appointment (from identify_patient response)"
+        },
+        "date": {
+          "type": "string",
+          "description": "Required for book/reschedule: the date (e.g., 'tomorrow', 'Monday', 'March 5th')"
+        },
+        "time": {
+          "type": "string",
+          "description": "Required for book/reschedule: the time (e.g., '10am', '2:30 PM')"
+        },
+        "providerName": {
+          "type": "string",
+          "description": "Optional: specific provider for book/reschedule"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional: reason for cancellation"
+        }
+      },
+      "required": ["action"]
+    }
+  },
+  "server": {
+    "url": "{{SERVER_URL}}/vapi/tools"
+  }
+}

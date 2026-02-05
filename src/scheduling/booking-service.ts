@@ -482,11 +482,13 @@ export async function cancelAppointment(
   }
 
   // MRS unavailable - cancel locally and queue for sync
+  // Mark as unsynced so sync service doesn't overwrite this local change
   await prisma.appointment.update({
     where: { id: request.appointmentId },
     data: {
       status: 'cancelled',
       cancelReason: request.reason,
+      syncedToMrs: false, // Mark as unsynced - local change pending push
     },
   });
 

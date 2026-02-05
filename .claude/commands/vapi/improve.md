@@ -26,8 +26,27 @@ Improve VAPI voice assistant behavior. Use this when calls aren't working as exp
 **Commands**:
 ```bash
 pnpm run vapi:logs --last    # See transcript of last call (START HERE)
+pnpm run vapi:logs --last 3  # See last 3 calls
+pnpm run vapi:list           # List all assistants and phone assignments
 pnpm run vapi:setup          # Deploy prompt/tool changes to VAPI
+pnpm run vapi:assign "<assistant-name>" <phone>  # Assign assistant to phone
 pnpm run build               # Must build before vapi:setup picks up code changes
+```
+
+**Current Assistants** (run `pnpm run vapi:list` for latest):
+| Assistant | Voice | Purpose |
+|-----------|-------|---------|
+| Elise - Maple Grove Medical | 11Labs | Production (MRS) |
+| Elise - Evergreen Health | Deepgram | Production (EMR) |
+| Elise - Unified Tools | Deepgram | Testing |
+| Elise - Claude Multitools | Deepgram | Testing |
+
+**Phone Assignment Example**:
+```bash
+# Switch to experimental assistant for testing
+pnpm run vapi:assign "Elise - Unified Tools" OpenMRS
+# Test, then switch back to production
+pnpm run vapi:assign "Elise - Maple Grove Medical" OpenMRS
 ```
 
 ---
@@ -108,3 +127,26 @@ This removes the need for a second tool call.
 - After any .ts change, run `pnpm run build`
 - After any config change, run `pnpm run vapi:setup`
 - Test with an actual call, not just code review
+
+---
+
+## Advanced: Direct API Access
+
+For operations not covered by scripts, see `docs/VAPI_REFERENCE.md` for API patterns.
+
+**Quick script template** (save to `scripts/` and run with `pnpm exec tsx`):
+```typescript
+import { loadEnv } from '../src/utils/env.js';
+loadEnv();
+
+async function main() {
+  const res = await fetch('https://api.vapi.ai/assistant', {
+    headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}` }
+  });
+  const data = await res.json();
+  console.log(data);
+}
+main();
+```
+
+**Note**: Don't use `tsx -e` with top-level await - create a script file instead.

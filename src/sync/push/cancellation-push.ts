@@ -31,6 +31,7 @@ export async function pushCancellationToMRS(
     await prisma.appointment.update({
       where: { id: appointmentId },
       data: {
+        syncedToMrs: true,  // Mark as synced - push succeeded
         syncedToMrsAt: new Date(),
         lastSyncError: null,
       },

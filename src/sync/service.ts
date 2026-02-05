@@ -7,6 +7,7 @@ import type { MRSPatient, MRSProvider, MRSAppointment, MRSSlot, NewPatient } fro
 import { MRSError } from '../mrs/errors.js';
 import { syncScheduleTemplates } from './entities/schedule-templates.js';
 import { processPushJobs } from './push/appointment-push.js';
+import { processCancellationJobs } from './push/cancellation-push.js';
 
 const DEFAULT_SYNC_INTERVAL_MS = 300000; // 5 minutes
 const DEFAULT_MAX_REQUESTS_PER_CYCLE = 20; // Leave bandwidth for real-time ops
@@ -144,6 +145,12 @@ export class SyncService {
       const jobsProcessed = await processPushJobs(this.adapter);
       if (jobsProcessed > 0) {
         console.log(`[Sync] Processed ${jobsProcessed} appointment push jobs`);
+      }
+
+      // Process queued cancellation push jobs
+      const cancellationsProcessed = await processCancellationJobs(this.adapter);
+      if (cancellationsProcessed > 0) {
+        console.log(`[Sync] Processed ${cancellationsProcessed} cancellation push jobs`);
       }
 
       const duration = Date.now() - startTime;

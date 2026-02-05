@@ -77,6 +77,12 @@ export async function syncAppointments(adapter: MRSAdapter): Promise<SyncResult>
     }
 
     for (const { local, mrs } of changes.updated) {
+      // Skip if local has unsynced changes (syncedToMrs = false) - local change takes precedence
+      if (!local.syncedToMrs) {
+        console.log(`[Sync] Skipping appointment ${local.id} - has pending local changes`);
+        continue;
+      }
+
       await prisma.appointment.update({
         where: { id: local.id },
         data: {
@@ -90,9 +96,17 @@ export async function syncAppointments(adapter: MRSAdapter): Promise<SyncResult>
     }
 
     for (const conflict of changes.conflicts) {
+      const local = conflict.localState as typeof localAppointments[0];
+
+      // Skip if local has unsynced changes - local change takes precedence
+      if (!local.syncedToMrs) {
+        console.log(`[Sync] Skipping conflict resolution for ${local.id} - has pending local changes`);
+        conflicts++;
+        continue;
+      }
+
       const resolution = await resolveConflict(conflict);
       if (resolution.action === 'mrs_wins') {
-        const local = conflict.localState as typeof localAppointments[0];
         const mrs = conflict.mrsState as MRSAppointment;
         await prisma.appointment.update({
           where: { id: local.id },

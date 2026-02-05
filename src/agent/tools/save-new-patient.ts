@@ -4,6 +4,7 @@ import { parseDate } from '../../utils/date.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { MRSAdapter } from '../../mrs/adapter.js';
 import type { NewPatient } from '../../mrs/types.js';
+import { getSuggestedAvailability, type SuggestedAvailability } from './suggested-availability.js';
 
 export interface SaveNewPatientParams {
   phone: string; // Caller ID by default, or LLM-provided if user gave a different number
@@ -19,6 +20,8 @@ export interface SaveNewPatientResult {
     name: string;
   };
   message?: string;
+  /** Pre-fetched availability so assistant can offer scheduling immediately */
+  suggestedAvailability?: SuggestedAvailability;
 }
 
 // MRS adapter instance - set by the server
@@ -205,6 +208,9 @@ export async function saveNewPatient(
     }
   }
 
+  // Fetch suggested availability so assistant can offer scheduling immediately
+  const suggestedAvailability = await getSuggestedAvailability();
+
   return {
     success: true,
     patient: {
@@ -212,5 +218,6 @@ export async function saveNewPatient(
       name: patient.name,
     },
     message: `Welcome ${givenName}! You've been registered as a new patient.`,
+    suggestedAvailability,
   };
 }

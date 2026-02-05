@@ -1,0 +1,42 @@
+{
+  "type": "function",
+  "messages": [
+    {
+      "type": "request-start",
+      "content": "Let me reschedule that for you..."
+    },
+    {
+      "type": "request-failed",
+      "content": "I'm having trouble rescheduling. Could you try again?"
+    }
+  ],
+  "function": {
+    "name": "reschedule_appointment",
+    "description": "Reschedule an existing appointment to a new date and time. Use this when a patient wants to MOVE or CHANGE their existing appointment. This will cancel the old appointment and book the new one.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "appointmentId": {
+          "type": "string",
+          "description": "The ID of the appointment to reschedule (from identify_patient response)"
+        },
+        "date": {
+          "type": "string",
+          "description": "The new date for the appointment (e.g., 'tomorrow', 'Monday', 'March 5th')"
+        },
+        "time": {
+          "type": "string",
+          "description": "The new time for the appointment (e.g., '10am', '2:30 PM', '10 o'clock')"
+        },
+        "providerName": {
+          "type": "string",
+          "description": "Optional: new provider if the patient wants to switch providers"
+        }
+      },
+      "required": ["appointmentId", "date", "time"]
+    }
+  },
+  "server": {
+    "url": "{{SERVER_URL}}/vapi/tools"
+  }
+}

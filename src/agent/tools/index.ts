@@ -2,12 +2,18 @@ import { identifyPatient, IdentifyPatientParams } from './identify-patient.js';
 import { saveNewPatient, SaveNewPatientParams, setMRSAdapterForPatient } from './save-new-patient.js';
 import { getAvailability, GetAvailabilityParams } from './get-availability.js';
 import { bookAppointment, BookAppointmentParams, setMRSAdapter as setBookingAdapter } from './book-appointment.js';
+import { rescheduleAppointment, RescheduleAppointmentParams, setMRSAdapterForReschedule } from './reschedule-appointment.js';
+import { cancelAppointmentTool, CancelAppointmentParams, setMRSAdapterForCancel } from './cancel-appointment.js';
+import { manageAppointment, ManageAppointmentParams, setMRSAdapterForManage } from './manage-appointment.js';
 import type { MRSAdapter } from '../../mrs/adapter.js';
 
 // Set MRS adapter for all tools that need it
 export function setMRSAdapter(adapter: MRSAdapter | null): void {
   setBookingAdapter(adapter);
   setMRSAdapterForPatient(adapter);
+  setMRSAdapterForReschedule(adapter);
+  setMRSAdapterForCancel(adapter);
+  setMRSAdapterForManage(adapter);
 }
 
 // VAPI tool call request format
@@ -58,6 +64,18 @@ const tools: Record<string, ToolHandler> = {
   book_appointment: async (args, callId) => {
     const params = args as unknown as BookAppointmentParams;
     return bookAppointment(params, callId);
+  },
+  reschedule_appointment: async (args, callId) => {
+    const params = args as unknown as RescheduleAppointmentParams;
+    return rescheduleAppointment(params, callId);
+  },
+  cancel_appointment: async (args, callId) => {
+    const params = args as unknown as CancelAppointmentParams;
+    return cancelAppointmentTool(params, callId);
+  },
+  manage_appointment: async (args, callId) => {
+    const params = args as unknown as ManageAppointmentParams;
+    return manageAppointment(params, callId);
   },
 };
 

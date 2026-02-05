@@ -11,6 +11,7 @@ interface VapiAssistant {
 interface VapiPhoneNumber {
   id: string;
   number: string;
+  name?: string;
   assistantId?: string;
 }
 
@@ -55,16 +56,15 @@ async function assignAssistant(apiKey: string, phoneId: string, assistantId: str
 
 function printUsage() {
   console.log(`
-Usage: pnpm run vapi:assign <assistant-name-or-id> [phone-number-or-id]
+Usage: pnpm run vapi:assign <assistant-name> [phone-name-or-number]
 
 If you only have one phone number, you can omit it.
 
 Examples:
-  pnpm run vapi:assign jessica
-  pnpm run vapi:assign asteria
-  pnpm run vapi:assign orion
-  pnpm run vapi:assign "Elise (Jessica - Warm)"
-  pnpm run vapi:assign abc123-def456 +15551234567
+  pnpm run vapi:assign "Elise - Unified Tools" OpenMRS
+  pnpm run vapi:assign "Claude Multitools" openmrs
+  pnpm run vapi:assign jessica OpenEMR
+  pnpm run vapi:assign "Elise (Jessica - Warm)" +15551234567
 
 Run 'pnpm run vapi:list' to see available phones and assistants.
 `);
@@ -100,7 +100,9 @@ async function main() {
     const isPhone = phoneNumbers.some(p =>
       p.id === lastArg ||
       p.number === lastArg ||
-      p.number.replace(/\D/g, '') === lastArg.replace(/\D/g, '')
+      p.number.replace(/\D/g, '') === lastArg.replace(/\D/g, '') ||
+      (p.name && p.name.toLowerCase() === lastArg.toLowerCase()) ||
+      (p.name && p.name.toLowerCase().includes(lastArg.toLowerCase()))
     );
 
     if (isPhone) {
@@ -120,23 +122,29 @@ async function main() {
     phone = phoneNumbers.find(p =>
       p.id === phoneArg ||
       p.number === phoneArg ||
-      p.number.replace(/\D/g, '') === phoneArg.replace(/\D/g, '')
+      p.number.replace(/\D/g, '') === phoneArg.replace(/\D/g, '') ||
+      (p.name && p.name.toLowerCase() === phoneArg.toLowerCase()) ||
+      (p.name && p.name.toLowerCase().includes(phoneArg.toLowerCase()))
     );
 
     if (!phone) {
       console.error(`Error: Phone number not found: ${phoneArg}`);
+      console.error('\nAvailable phones:');
+      for (const p of phoneNumbers) {
+        console.error(`  ${p.name || '(unnamed)'}: ${p.number}`);
+      }
       process.exit(1);
     }
   } else if (phoneNumbers.length === 1) {
     phone = phoneNumbers[0];
-    console.log(`Using default phone: ${phone.number}`);
+    console.log(`Using default phone: ${phone.name || phone.number}`);
   } else if (phoneNumbers.length === 0) {
     console.error('Error: No phone numbers found. Buy one in the VAPI dashboard.');
     process.exit(1);
   } else {
     console.error('Error: Multiple phone numbers found. Please specify which one:');
     for (const p of phoneNumbers) {
-      console.error(`  ${p.number} (${p.id})`);
+      console.error(`  ${p.name || '(unnamed)'}: ${p.number}`);
     }
     process.exit(1);
   }
@@ -158,7 +166,8 @@ async function main() {
   }
 
   // Assign the assistant to the phone number
-  console.log(`Assigning "${assistant.name}" to ${phone.number}...`);
+  const phoneLabel = phone.name ? `${phone.name} (${phone.number})` : phone.number;
+  console.log(`Assigning "${assistant.name}" to ${phoneLabel}...`);
   await assignAssistant(apiKey, phone.id, assistant.id);
 
   console.log('Done!\n');

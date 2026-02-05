@@ -27,6 +27,7 @@ interface OfficeConfig {
   profile?: string;
   template: Record<string, string>;
   overrides?: Record<string, unknown>;
+  toolFilter?: string[]; // Only include these tools (by function name)
 }
 
 function interpolateEnvVars(content: string): string {
@@ -87,7 +88,7 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   return result;
 }
 
-function loadAssistantConfig(configPath: string, assistantsDir: string): { config: Record<string, unknown>; profile?: string } {
+function loadAssistantConfig(configPath: string, assistantsDir: string): { config: Record<string, unknown>; profile?: string; toolFilter?: string[] } {
   const configContent = readFileSync(configPath, 'utf-8');
   const config = JSON.parse(configContent);
 
@@ -117,7 +118,7 @@ function loadAssistantConfig(configPath: string, assistantsDir: string): { confi
       mergedConfig = deepMerge(mergedConfig, officeConfig.overrides);
     }
 
-    return { config: mergedConfig, profile: officeConfig.profile };
+    return { config: mergedConfig, profile: officeConfig.profile, toolFilter: officeConfig.toolFilter };
   }
 
   // Legacy full config - just interpolate env vars
@@ -314,7 +315,7 @@ async function main() {
   const assistantsDir = join(configDir, 'assistants');
 
   // Step 1: Create/update tools (skip in dry-run)
-  const toolIds: string[] = [];
+  const toolsMap: Map<string, string> = new Map(); // name -> id
   if (!dryRun) {
     console.log('\n=== Setting up VAPI Tools ===\n');
 
@@ -322,11 +323,14 @@ async function main() {
     for (const toolFile of toolFiles) {
       const toolConfigContent = readFileSync(join(configDir, toolFile), 'utf-8');
       const toolConfig = JSON.parse(interpolateEnvVars(toolConfigContent));
+      const toolName = toolConfig.function?.name;
       const toolId = await createOrUpdateTool(apiKey!, toolConfig);
-      toolIds.push(toolId);
+      if (toolName) {
+        toolsMap.set(toolName, toolId);
+      }
     }
 
-    console.log(`\n  ${toolIds.length} tools ready\n`);
+    console.log(`\n  ${toolsMap.size} tools ready\n`);
   }
 
   // Step 2: Create/update assistants
@@ -357,14 +361,25 @@ async function main() {
       const configPath = join(assistantsDir, file);
 
       try {
-        const { config: assistantConfig, profile } = loadAssistantConfig(configPath, assistantsDir);
+        const { config: assistantConfig, profile, toolFilter } = loadAssistantConfig(configPath, assistantsDir);
 
         if (dryRun) {
           console.log(`\n  --- Merged config for ${file} (profile: ${profile || 'none'}) ---`);
           console.log(JSON.stringify(assistantConfig, null, 2));
           console.log(`  --- End ${file} ---\n`);
         } else {
-          const assistant = await createOrUpdateAssistant(apiKey!, assistantConfig, toolIds);
+          // Filter tools if toolFilter is specified
+          let assistantToolIds: string[];
+          if (toolFilter && toolFilter.length > 0) {
+            assistantToolIds = toolFilter
+              .map(name => toolsMap.get(name))
+              .filter((id): id is string => id !== undefined);
+            console.log(`    Using filtered tools: ${toolFilter.join(', ')}`);
+          } else {
+            assistantToolIds = [...toolsMap.values()];
+          }
+
+          const assistant = await createOrUpdateAssistant(apiKey!, assistantConfig, assistantToolIds);
           createdAssistants.push({ assistant, profile });
 
           // Auto-update profile config with assistant ID
@@ -407,7 +422,7 @@ async function main() {
   console.log('\nProfile configs updated. Restart your server to use the new assistant IDs.');
   console.log('\nNext steps:');
   console.log('1. Run `pnpm run vapi:list` to see all assistants and phone numbers');
-  console.log('2. Run `pnpm run vapi:assign <phone> <assistant>` to assign an assistant to a phone');
+  console.log('2. Run `pnpm run vapi:assign "<assistant-name>" <phone>` to assign an assistant to a phone');
   console.log('3. Call the phone number to test!');
 }
 

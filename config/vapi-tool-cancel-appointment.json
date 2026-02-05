@@ -1,0 +1,34 @@
+{
+  "type": "function",
+  "messages": [
+    {
+      "type": "request-start",
+      "content": "Let me cancel that for you..."
+    },
+    {
+      "type": "request-failed",
+      "content": "I'm having trouble cancelling. Could you try again?"
+    }
+  ],
+  "function": {
+    "name": "cancel_appointment",
+    "description": "Cancel an existing appointment. Use this when a patient wants to cancel their appointment entirely (not reschedule).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "appointmentId": {
+          "type": "string",
+          "description": "The ID of the appointment to cancel (from identify_patient response)"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional: reason for cancellation"
+        }
+      },
+      "required": ["appointmentId"]
+    }
+  },
+  "server": {
+    "url": "{{SERVER_URL}}/vapi/tools"
+  }
+}

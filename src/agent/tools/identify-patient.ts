@@ -1,7 +1,7 @@
 import { prisma } from '../../db/client.js';
 import { normalizePhone } from '../../utils/phone.js';
 import { parseDate, isSameDate, formatDateForSpeech, formatTimeForSpeech } from '../../utils/date.js';
-import { searchAvailability } from '../../scheduling/index.js';
+import { getSuggestedAvailability, type SuggestedSlot } from './suggested-availability.js';
 
 export interface IdentifyPatientParams {
   phone: string;
@@ -24,11 +24,7 @@ export interface UpcomingAppointment {
   highlight: boolean;
 }
 
-export interface SuggestedSlot {
-  dateForSpeech: string;
-  timeForSpeech: string;
-  providerName: string;
-}
+export type { SuggestedSlot } from './suggested-availability.js';
 
 export interface IdentifyPatientResult {
   status: IdentifyPatientStatus;
@@ -80,63 +76,6 @@ async function getUpcomingAppointments(patientId: string): Promise<UpcomingAppoi
   });
 }
 
-/**
- * Get a few suggested availability slots for patients with no upcoming appointments.
- * This allows the assistant to offer scheduling without a separate get_availability call.
- */
-async function getSuggestedAvailability(): Promise<{ slots: SuggestedSlot[]; summary: string }> {
-  const result = await searchAvailability({
-    startDate: new Date(),
-    maxDays: 14,
-    findFirst: false,
-  });
-
-  // Get provider names
-  const providerIds = new Set<string>();
-  for (const windows of result.availabilityByDate.values()) {
-    for (const w of windows) {
-      if (w.providerId) providerIds.add(w.providerId);
-    }
-  }
-  const providers = await prisma.provider.findMany({
-    where: { id: { in: [...providerIds] } },
-    select: { id: true, name: true },
-  });
-  const providerMap = new Map(providers.map(p => [p.id, p.name]));
-
-  // Take first 3 slots across different days for variety
-  const slots: SuggestedSlot[] = [];
-  const seenDates = new Set<string>();
-
-  for (const [isoDate, windows] of [...result.availabilityByDate.entries()].sort()) {
-    if (slots.length >= 3) break;
-    if (seenDates.has(isoDate)) continue;
-
-    const firstWindow = windows[0];
-    if (!firstWindow) continue;
-
-    const rawName = firstWindow.providerId ? providerMap.get(firstWindow.providerId) : undefined;
-    const providerName = rawName?.toLowerCase().includes('unknown') ? '' : rawName ?? '';
-
-    slots.push({
-      dateForSpeech: formatDateForSpeech(firstWindow.startTime),
-      timeForSpeech: formatTimeForSpeech(firstWindow.startTime),
-      providerName,
-    });
-    seenDates.add(isoDate);
-  }
-
-  if (slots.length === 0) {
-    return { slots: [], summary: 'No appointments are currently available. Please check back later.' };
-  }
-
-  const slotDescriptions = slots.map(s => `${s.dateForSpeech} at ${s.timeForSpeech}`);
-  const summary = slots.length === 1
-    ? `The next available appointment is ${slotDescriptions[0]}.`
-    : `I have openings on ${slotDescriptions.slice(0, -1).join(', ')} or ${slotDescriptions[slotDescriptions.length - 1]}.`;
-
-  return { slots, summary };
-}
 
 export async function identifyPatient(
   params: IdentifyPatientParams,
@@ -186,8 +125,11 @@ export async function identifyPatient(
       await updateConversationPatient(callId, patient.id);
       const upcomingAppointments = await getUpcomingAppointments(patient.id);
 
-      // If patient has appointments, focus on those; otherwise, offer scheduling
+      // Always include suggested availability so LLM doesn't need to call get_availability
+      const suggestedAvailability = await getSuggestedAvailability();
+
       if (upcomingAppointments.length > 0) {
+        // Patient has appointments - focus on those, but include availability in case they want to book more
         return {
           status: 'existing',
           patient: {
@@ -197,6 +139,7 @@ export async function identifyPatient(
           },
           upcomingAppointments,
           nextAction: 'discuss_appointments',
+          suggestedAvailability, // Include so LLM doesn't need to call get_availability
         };
       } else {
         // No appointments - pre-fetch availability so assistant can offer scheduling

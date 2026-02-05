@@ -1,6 +1,6 @@
 import { prisma } from '../../db/client.js';
 import { parseDate, parseTime, formatTimeForSpeech, formatDateForSpeech } from '../../utils/date.js';
-import { bookAppointmentByDatetime, type BookingResult } from '../../scheduling/index.js';
+import { bookAppointmentByDatetime, isWithinSchedule, type BookingResult } from '../../scheduling/index.js';
 import type { MRSAdapter } from '../../mrs/adapter.js';
 
 export interface BookAppointmentParams {
@@ -78,17 +78,6 @@ export async function bookAppointment(
     };
   }
 
-  // Find provider (optional - if not specified, use any available)
-  const providerExplicitlyRequested = !!providerName;
-  const provider = await findProvider(providerName);
-  if (!provider) {
-    return {
-      success: false,
-      message: `I couldn't find a provider named ${providerName}. Would you like me to book with any available provider?`,
-      error: 'provider_not_found',
-    };
-  }
-
   // Find service type (default to general checkup if not specified)
   const service = await findService(serviceType);
   if (!service) {
@@ -102,6 +91,22 @@ export async function bookAppointment(
   // Calculate end time based on service duration
   const endTime = new Date(startTime);
   endTime.setMinutes(endTime.getMinutes() + service.durationMinutes);
+
+  // Find provider - if specified by name, use that; otherwise find one available at the requested time
+  const providerExplicitlyRequested = !!providerName;
+  const provider = providerName
+    ? await findProviderByName(providerName)
+    : await findAvailableProvider(startTime, endTime);
+
+  if (!provider) {
+    return {
+      success: false,
+      message: providerName
+        ? `I couldn't find a provider named ${providerName}. Would you like me to book with any available provider?`
+        : `No providers are available at that time. Would you like me to suggest another time?`,
+      error: providerName ? 'provider_not_found' : 'outside_schedule',
+    };
+  }
 
   // Attempt to book
   const result = await bookAppointmentByDatetime(mrsAdapter, {
@@ -177,17 +182,7 @@ async function getPatientFromConversation(callId?: string): Promise<string | nul
   return conversation?.patientId ?? null;
 }
 
-async function findProvider(name?: string): Promise<{ id: string; name: string; mrsId: string } | null> {
-  if (!name) {
-    // Return any provider with schedule templates
-    const provider = await prisma.provider.findFirst({
-      where: {
-        scheduleTemplates: { some: {} },
-      },
-    });
-    return provider;
-  }
-
+async function findProviderByName(name: string): Promise<{ id: string; name: string; mrsId: string } | null> {
   // Search by name (case-insensitive, partial match)
   const normalizedName = name.toLowerCase().trim();
   const providers = await prisma.provider.findMany({
@@ -203,6 +198,28 @@ async function findProvider(name?: string): Promise<{ id: string; name: string; 
       normalizedName.includes(providerNameLower) ||
       providerNameLower.includes(normalizedName.replace(/^dr\.?\s*/i, ''))
     ) {
+      return provider;
+    }
+  }
+
+  return null;
+}
+
+async function findAvailableProvider(
+  startTime: Date,
+  endTime: Date
+): Promise<{ id: string; name: string; mrsId: string } | null> {
+  // Get all providers with schedule templates
+  const providers = await prisma.provider.findMany({
+    where: {
+      scheduleTemplates: { some: {} },
+    },
+  });
+
+  // Find the first provider who is available at the requested time
+  for (const provider of providers) {
+    const available = await isWithinSchedule(startTime, endTime, provider.id);
+    if (available) {
       return provider;
     }
   }

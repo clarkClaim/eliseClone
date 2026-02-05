@@ -80,14 +80,15 @@ async function main() {
   if (phoneNumbers.length === 0) {
     console.log('No phone numbers found. Buy one in the VAPI dashboard.');
   } else {
-    console.log('ID                                    | Number          | Assigned Assistant');
-    console.log('--------------------------------------|-----------------|-------------------------------------------');
+    console.log('Name            | Number          | Assigned Assistant');
+    console.log('----------------|-----------------|-------------------------------------------');
 
     for (const phone of phoneNumbers) {
       const assignedAssistant = phone.assistantId
         ? assistants.find(a => a.id === phone.assistantId)?.name || phone.assistantId
         : '(none)';
-      console.log(`${phone.id} | ${phone.number.padEnd(15)} | ${assignedAssistant}`);
+      const phoneName = (phone.name || '(unnamed)').padEnd(15);
+      console.log(`${phoneName} | ${phone.number.padEnd(15)} | ${assignedAssistant}`);
     }
   }
 
