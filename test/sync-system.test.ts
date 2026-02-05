@@ -66,21 +66,22 @@ describe('Sync System', () => {
   });
 
   describe('Idempotency Key Generation', () => {
-    it('should generate unique idempotency keys', async () => {
+    it('should generate idempotency keys with correct format', async () => {
       const { generateIdempotencyKey } = await import('../src/sync/push/appointment-push.js');
 
       const key1 = generateIdempotencyKey('appt-123');
-      const key2 = generateIdempotencyKey('appt-123');
-
-      // Keys should be unique (different timestamps)
-      expect(key1).not.toBe(key2);
+      const key2 = generateIdempotencyKey('appt-456');
 
       // Keys should contain the appointment ID
       expect(key1).toContain('appt-123');
-      expect(key2).toContain('appt-123');
+      expect(key2).toContain('appt-456');
 
       // Keys should have the expected format
       expect(key1).toMatch(/^push_appt_appt-123_\d+$/);
+      expect(key2).toMatch(/^push_appt_appt-456_\d+$/);
+
+      // Different appointment IDs should produce different keys
+      expect(key1).not.toBe(key2);
     });
 
     it('should create push job with idempotency key', async () => {

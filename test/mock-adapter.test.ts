@@ -98,6 +98,7 @@ describe('MockMRSAdapter', () => {
         startDateTime: baseTime,
         endDateTime: endTime,
         providerId: 'provider-1',
+        serviceId: 'service-1',
         reason: 'Checkup',
       });
 
@@ -117,6 +118,7 @@ describe('MockMRSAdapter', () => {
         startDateTime: baseTime,
         endDateTime: endTime,
         providerId: 'provider-1',
+        serviceId: 'service-1',
         reason: 'Checkup',
       });
 
@@ -131,6 +133,7 @@ describe('MockMRSAdapter', () => {
         startDateTime: baseTime,
         endDateTime: endTime,
         providerId: 'provider-1',
+        serviceId: 'service-1',
       });
 
       await expect(adapter.createAppointment({
@@ -138,6 +141,7 @@ describe('MockMRSAdapter', () => {
         startDateTime: baseTime,
         endDateTime: endTime,
         providerId: 'provider-1',
+        serviceId: 'service-1',
       })).rejects.toThrow(SlotConflictError);
     });
 
@@ -147,6 +151,7 @@ describe('MockMRSAdapter', () => {
         startDateTime: baseTime,
         endDateTime: endTime,
         providerId: 'provider-1',
+        serviceId: 'service-1',
       });
 
       await adapter.cancelAppointment(appointment.mrsId, 'Patient request');

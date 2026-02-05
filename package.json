@@ -22,6 +22,8 @@
     "vapi:delete": "tsx scripts/vapi-delete.ts",
     "vapi:logs": "tsx scripts/vapi-logs.ts",
     "setup:availability": "tsx scripts/setup-availability.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:openemr": "tsx scripts/test-openemr.ts",
     "test:openmrs": "tsx test/openmrs-integration.test.ts"
   },
@@ -45,7 +47,8 @@
     "dotenv": "^17.2.3",
     "prisma": "^7.3.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",

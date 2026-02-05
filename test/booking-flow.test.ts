@@ -3,7 +3,6 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MockMRSAdapter } from '../src/mrs/adapters/mock/index.js';
-import type { MRSSlot } from '../src/mrs/types.js';
 
 // Note: These tests mock the database interactions.
 // For full integration tests, run against a test database.
@@ -27,52 +26,49 @@ describe('Booking Flow - Unit Tests', () => {
     });
   });
 
-  describe('Slot Verification', () => {
-    it('should verify available slot', async () => {
-      const slot: MRSSlot = {
-        mrsId: 'slot-1',
-        providerMrsId: 'provider-1',
-        startTime: new Date('2024-01-15T10:00:00Z'),
-        endTime: new Date('2024-01-15T10:30:00Z'),
-        isBooked: false,
-      };
-      adapter.addSlot(slot);
+  describe('Conflict Detection', () => {
+    const baseTime = new Date('2024-01-15T10:00:00Z');
+    const endTime = new Date('2024-01-15T10:30:00Z');
 
-      const result = await adapter.verifySlotAvailable('slot-1');
-      expect(result.available).toBe(true);
+    it('should verify available slot', async () => {
+      const result = await adapter.checkConflicts({
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
+      });
+      expect(result.hasConflict).toBe(false);
     });
 
     it('should detect booked slot', async () => {
-      const slot: MRSSlot = {
-        mrsId: 'slot-1',
-        providerMrsId: 'provider-1',
-        startTime: new Date('2024-01-15T10:00:00Z'),
-        endTime: new Date('2024-01-15T10:30:00Z'),
-        isBooked: true,
-      };
-      adapter.addSlot(slot);
+      // Create an appointment first
+      await adapter.createAppointment({
+        patientMrsId: 'patient-1',
+        providerId: 'provider-1',
+        serviceId: 'service-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
+      });
 
-      const result = await adapter.verifySlotAvailable('slot-1');
-      expect(result.available).toBe(false);
+      const result = await adapter.checkConflicts({
+        startDateTime: baseTime,
+        endDateTime: endTime,
+        providerId: 'provider-1',
+      });
+      expect(result.hasConflict).toBe(true);
     });
   });
 
   describe('Appointment Creation', () => {
-    beforeEach(() => {
-      adapter.addSlot({
-        mrsId: 'slot-1',
-        providerMrsId: 'provider-1',
-        startTime: new Date('2024-01-15T10:00:00Z'),
-        endTime: new Date('2024-01-15T10:30:00Z'),
-        isBooked: false,
-      });
-    });
+    const baseTime = new Date('2024-01-15T10:00:00Z');
+    const endTime = new Date('2024-01-15T10:30:00Z');
 
     it('should create appointment successfully', async () => {
       const appointment = await adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        providerId: 'provider-1',
+        serviceId: 'service-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
         reason: 'Annual checkup',
       });
 
@@ -84,15 +80,19 @@ describe('Booking Flow - Unit Tests', () => {
       // First booking succeeds
       await adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        providerId: 'provider-1',
+        serviceId: 'service-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
       });
 
       // Second booking should fail
       await expect(adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        providerId: 'provider-1',
+        serviceId: 'service-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
       })).rejects.toThrow();
     });
   });
@@ -113,21 +113,17 @@ describe('Booking Flow - Unit Tests', () => {
   });
 
   describe('Cancellation', () => {
+    const baseTime = new Date('2024-01-15T10:00:00Z');
+    const endTime = new Date('2024-01-15T10:30:00Z');
     let appointmentMrsId: string;
 
     beforeEach(async () => {
-      adapter.addSlot({
-        mrsId: 'slot-1',
-        providerMrsId: 'provider-1',
-        startTime: new Date('2024-01-15T10:00:00Z'),
-        endTime: new Date('2024-01-15T10:30:00Z'),
-        isBooked: false,
-      });
-
       const appointment = await adapter.createAppointment({
         patientMrsId: 'patient-1',
-        providerMrsId: 'provider-1',
-        slotMrsId: 'slot-1',
+        providerId: 'provider-1',
+        serviceId: 'service-1',
+        startDateTime: baseTime,
+        endDateTime: endTime,
       });
 
       appointmentMrsId = appointment.mrsId;
